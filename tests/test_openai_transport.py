@@ -61,12 +61,13 @@ def test_real_langchain_serialization_with_mock_http(settings):
             http_client=client,
             max_retries=0,
             max_tokens=1800,
-            reasoning_effort="low",
+            reasoning_effort="none",
         )
         state = DataAgent(settings, model).run("Total de vendas")
     assert state["status"] == "completed"
     assert state["usage"]["input_tokens"] == 200
     assert requests[0]["parallel_tool_calls"] is False
+    assert requests[0]["reasoning_effort"] == "none"
     assert requests[0]["max_completion_tokens"] == 1800
     assert {t["function"]["name"] for t in requests[0]["tools"]} == {
         "list_tables",

@@ -1,6 +1,6 @@
 import pytest
 
-from src.agent import DataAgent
+from src.agent import DataAgent, has_numeric_evidence
 from tests.conftest import ScriptedModel, finish
 
 
@@ -141,6 +141,7 @@ def test_inconsistent_answer_can_be_corrected(settings):
     state = DataAgent(settings, model).run("Quantas vendas?")
     assert state["status"] == "completed" and state["corrections"] == 1
     assert any(event.get("error_code") == "inconsistent" for event in state["events"])
+    assert any("999" in event.get("message", "") for event in state["events"])
 
 
 def test_syntax_recovery(settings):
@@ -177,3 +178,31 @@ def test_missing_data_can_be_explained_after_schema(settings):
     )
     state = DataAgent(settings, model).run("Custo de frete por transportadora")
     assert state["status"] == "completed" and state["queries"] == 0
+
+
+def test_provider_configuration_error_is_not_transient(settings):
+    class ConfigurationError(Exception):
+        status_code = 400
+
+    state = DataAgent(settings, ScriptedModel(ConfigurationError("secret-provider-detail"))).run(
+        "Total de vendas"
+    )
+    assert state["error"]["code"] == "llm_configuration"
+    assert state["events"][-1]["http_status"] == 400
+    assert "secret-provider-detail" not in str(state)
+
+
+@pytest.mark.parametrize(
+    "text,value,supported",
+    [
+        ("2,2113", 157 / 71, True),
+        ("2,1622", 160 / 74, True),
+        ("1,9759", 164 / 83, True),
+        ("2,2114", 157 / 71, False),
+        ("3", 2.9, False),
+        ("51", 19, False),
+        ("19,00", 19, True),
+    ],
+)
+def test_numeric_evidence_accepts_only_supported_rounding(text, value, supported):
+    assert has_numeric_evidence(text, {str(value)}, [value]) == supported

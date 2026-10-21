@@ -73,7 +73,8 @@ ao modelo; violações de segurança encerram a execução. Vazio, truncamento e
 inconsistência têm tratamentos distintos.
 
 Tabelas e gráficos usam somente resultados executados. A resposta exige IDs válidos
-e verifica números explícitos contra dados/filtros; isso não prova a semântica da análise.
+e verifica números contra dados/filtros, aceitando arredondamento decimal validado
+deterministicamente; isso não prova a semântica da análise.
 O expansor mostra ferramentas, SQL, erros, tentativas e duração, sem raciocínio privado.
 Logs JSON locais omitem prompts, SQL e linhas individuais. Histórico e consultas ficam
 na sessão; não use a interface como serviço público sem controles adicionais.
@@ -108,8 +109,11 @@ essas condições pelos dados, não por consultas predefinidas no código de pro
 
 ## Limitações e melhorias
 
-Validação paga ainda pendente: mocks comprovam o fluxo, não a qualidade do modelo
-na interpretação de perguntas inéditas. As checagens numéricas não detectam toda
+Uma primeira bateria real conferiu WhatsApp, reclamações e médias por categoria com SQL
+independente. A resposta de médias foi revalidada offline após corrigir um falso positivo
+de arredondamento. A API exigiu `reasoning_effort="none"` para ferramentas nesse modelo
+via Chat Completions. Avaliação ampliada de perguntas inéditas permanece pendente.
+As checagens numéricas não detectam toda
 conclusão semântica incorreta; comparar resposta, SQL e referência continua necessário.
 As relações inferidas por nome/tipo são hipóteses. Checkpoints desaparecem ao encerrar
 o processo. Tarifas são configuráveis e o orçamento local não cobre uso externo à aplicação.

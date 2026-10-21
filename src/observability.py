@@ -13,7 +13,16 @@ class AuditLog:
         # SQL, prompts and result rows stay in the session, not in persistent logs.
         allowed = {
             key: event[key]
-            for key in ("stage", "tool", "duration_ms", "error_code", "attempt", "status", "usage")
+            for key in (
+                "stage",
+                "tool",
+                "duration_ms",
+                "error_code",
+                "attempt",
+                "status",
+                "usage",
+                "http_status",
+            )
             if key in event
         }
         with self.path.open("a", encoding="utf-8") as stream:
