@@ -130,3 +130,36 @@ def test_unterminated_string_is_recoverable(settings):
     with pytest.raises(DatabaseError) as exc:
         Database(settings).execute("SELECT 'unfinished", "q1")
     assert exc.value.code == "syntax" and exc.value.recoverable
+
+
+def test_nulls_averages_and_join_fanout(settings):
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.executescript("""
+            INSERT INTO sales VALUES (4,3,NULL,'2025-05-31','App');
+            CREATE TABLE contacts(id INTEGER PRIMARY KEY, people_id INTEGER);
+            INSERT INTO contacts VALUES(1,1),(2,1),(3,2);
+        """)
+    database = Database(settings)
+    result = database.execute(
+        """SELECT COUNT(*) purchases, COUNT(amount) known_values,
+        COUNT(DISTINCT people_id) buyers, AVG(amount) mean_value FROM sales
+        WHERE sold_on >= '2025-05-01' AND sold_on < '2025-06-01'""",
+        "q1",
+    )
+    assert result.rows == [[3, 2, 2, 15.0]]
+    joined = database.execute(
+        """SELECT COUNT(DISTINCT s.people_id) buyers FROM sales s
+        JOIN contacts c ON c.people_id=s.people_id WHERE s.channel='App'""",
+        "q2",
+    )
+    assert joined.rows == [[1]]
+
+
+def test_result_byte_limit(settings):
+    settings.max_result_bytes = 1000
+    with sqlite3.connect(settings.database_path) as connection:
+        connection.executemany(
+            "INSERT INTO people VALUES (?,?)", [(n, "x" * 400) for n in range(4, 10)]
+        )
+    result = Database(settings).execute("SELECT region FROM people", "q1")
+    assert result.status == "truncated"
