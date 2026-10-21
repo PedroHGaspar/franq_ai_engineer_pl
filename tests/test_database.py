@@ -124,3 +124,9 @@ def test_syntax_is_recoverable():
     with pytest.raises(DatabaseError) as exc:
         validate_sql("SELECT FROM")
     assert exc.value.recoverable
+
+
+def test_unterminated_string_is_recoverable(settings):
+    with pytest.raises(DatabaseError) as exc:
+        Database(settings).execute("SELECT 'unfinished", "q1")
+    assert exc.value.code == "syntax" and exc.value.recoverable

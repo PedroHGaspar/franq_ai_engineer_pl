@@ -38,8 +38,10 @@ def validate_sql(sql: str) -> str:
         raise DatabaseError("unsafe_sql", "Consulta excede o tamanho permitido.")
     try:
         statements = sqlglot.parse(sql, read="sqlite")
-    except sqlglot.errors.ParseError as exc:
+    except (sqlglot.errors.ParseError, sqlglot.errors.TokenError) as exc:
         raise DatabaseError("syntax", "Sintaxe SQL inválida: " + str(exc)[:300], True) from exc
+    except RecursionError as exc:
+        raise DatabaseError("unsafe_sql", "Consulta excede a complexidade permitida.") from exc
     if len(statements) != 1 or statements[0] is None:
         raise DatabaseError("unsafe_sql", "Envie exatamente uma instrução SELECT.")
     tree = statements[0]

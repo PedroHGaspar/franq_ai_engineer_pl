@@ -1,9 +1,19 @@
+import socket
 import sqlite3
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from src.config import Settings
+
+
+@pytest.fixture(autouse=True)
+def block_network(monkeypatch):
+    def denied(*args, **kwargs):
+        raise AssertionError("Testes gratuitos não podem abrir conexões de rede.")
+
+    monkeypatch.setattr(socket.socket, "connect", denied)
+    monkeypatch.setattr(socket, "create_connection", denied)
 
 
 @pytest.fixture

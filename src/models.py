@@ -21,6 +21,9 @@ class ChartSpec(BaseModel):
 
 
 class FinalAnswer(BaseModel):
+    answerable: bool = Field(
+        True, description="Falso quando o schema não contém os dados necessários"
+    )
     summary: str = Field(description="Conclusão em português, fundamentada nas evidências")
     evidence_ids: list[str] = Field(description="IDs das consultas que sustentam a resposta")
     assumptions: list[str] = Field(description="Interpretações, período e denominadores adotados")
