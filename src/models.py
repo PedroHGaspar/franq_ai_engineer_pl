@@ -1,0 +1,46 @@
+from typing import Any, Literal, TypedDict
+
+from langchain_core.messages import BaseMessage
+from pydantic import BaseModel, Field
+
+
+class QueryResult(BaseModel):
+    id: str
+    sql: str
+    columns: list[str]
+    rows: list[list[Any]]
+    status: Literal["ok", "empty", "truncated"]
+    duration_ms: float
+
+
+class ChartSpec(BaseModel):
+    kind: Literal["table", "bar", "line", "none"] = "table"
+    x: str | None = None
+    y: str | None = None
+    color: str | None = None
+
+
+class FinalAnswer(BaseModel):
+    summary: str = Field(description="Conclusão em português, fundamentada nas evidências")
+    evidence_ids: list[str] = Field(description="IDs das consultas que sustentam a resposta")
+    assumptions: list[str] = Field(description="Interpretações, período e denominadores adotados")
+    chart: ChartSpec
+
+
+class AgentState(TypedDict, total=False):
+    run_id: str
+    question: str
+    messages: list[BaseMessage]
+    pending: dict[str, Any]
+    results: list[dict[str, Any]]
+    events: list[dict[str, Any]]
+    failed_sql: list[str]
+    model_calls: int
+    iterations: int
+    queries: int
+    corrections: int
+    error: dict[str, Any] | None
+    status: str
+    answer: dict[str, Any] | None
+    clarification: str | None
+    usage: dict[str, Any]
