@@ -30,6 +30,9 @@ class FinalAnswer(BaseModel):
     )
     summary: str = Field(description="Conclusão em português, fundamentada nas evidências")
     evidence_ids: list[str] = Field(description="IDs das consultas que sustentam a resposta")
+    primary_result_id: str | None = Field(
+        None, description="ID da consulta que responde diretamente à pergunta, não de descoberta"
+    )
     assumptions: list[str] = Field(description="Interpretações, período e denominadores adotados")
     chart: ChartSpec
 
@@ -50,5 +53,9 @@ class AgentState(TypedDict, total=False):
     status: str
     answer: dict[str, Any] | None
     presentation: dict[str, Any]
+    primary_id: str | None
     clarification: str | None
+    clarifications: list[str]
+    period: str | None
+    coverage: tuple[str, str] | None
     usage: dict[str, Any]

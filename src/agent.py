@@ -1,7 +1,7 @@
 import json
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from math import isfinite
 from uuid import uuid4
@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from src.config import Settings
 from src.database import Database, DatabaseError, validate_sql
+from src.intent import resolve_period, select_primary
 from src.models import AgentState, FinalAnswer
 from src.observability import AuditLog, BudgetLedger
 from src.presentation import prepare_presentation
@@ -31,8 +32,8 @@ Preserve grafia, maiúsculas e acentos dos valores descobertos.
 Não confunda clientes únicos (COUNT DISTINCT), compras e interações.
 Evite multiplicação de linhas em JOIN: agregue cada relação antes de juntá-las, ou use EXISTS.
 Declare o denominador de médias; se houver interpretações relevantes, peça esclarecimento.
-Datas sem ano e 'último ano' exigem contexto ou esclarecimento. Não substitua a data atual pela
-última data do banco silenciosamente. Filtre intervalos com início inclusivo e fim exclusivo.
+Quando houver 'Período resolvido', use exatamente esse intervalo.
+Filtre intervalos com início inclusivo e fim exclusivo.
 Reclamações não são todos os contatos. Canal precisa ser identificado nos valores reais.
 Compare resumos armazenados com eventos se necessário; não trate divergências como equivalentes.
 Use SUM, COUNT e médias no SQL, nunca recalcule mentalmente os resultados.
@@ -40,6 +41,10 @@ Após resultado suficiente, finalize sem consultas redundantes. Resultados vazio
 Resultados truncados não sustentam totais ou rankings completos: refine a agregação.
 Erros recuperáveis permitem nova SQL contextual; não repita SQL falha ou amplie permissões.
 Para concluir chame finish: cite IDs reais, explique filtros, período, métrica e limitações.
+Consultas de descoberta (valores distintos, datas mínima/máxima, amostras) não respondem
+perguntas de contagem, comparação ou tendência: conclua com a consulta agregada na
+granularidade pedida e indique-a em primary_result_id. Tendência exige agregação por período
+e pela dimensão pedida.
 Não invente números ou fatos. Se dados forem insuficientes, explique a limitação.
 Se o schema inspecionado não permite responder, finalize com answerable=false e sem evidências.
 Números no texto devem constar nas evidências ou nos filtros SQL. Arredondamento de apresentação
@@ -72,6 +77,63 @@ def has_numeric_evidence(number: str, exact: set[str], values: list[int | float]
         return False
 
 
+DATES = re.compile(r"\b(\d{2})/(\d{2})/(\d{4})\b|\b(\d{4})-(\d{2})-(\d{2})\b|\b(\d{2})/(\d{4})\b")
+NUMBER = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def unsupported_numbers(text: str, results: list[dict]) -> list[str]:
+    """Numbers in the text that no cited result, SQL filter or derived count supports."""
+    evidence = json.dumps(
+        [{"rows": r["rows"], "sql": r["sql"]} for r in results], ensure_ascii=False
+    )
+    exact = set(re.findall(r"\d+(?:[.,]\d+)?", evidence))
+    values = [
+        value
+        for result in results
+        for row in result["rows"]
+        for value in row
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    # Row and distinct-value counts are derived deterministically from the cited results.
+    counts = {len(r["rows"]) for r in results} | {
+        len({str(row[i]) for row in r["rows"]}) for r in results for i in range(len(r["columns"]))
+    }
+    unsupported = []
+
+    def check_date(match: re.Match) -> str:
+        if match.group(1):
+            day, month, year = match.group(1, 2, 3)
+        elif match.group(4):
+            year, month, day = match.group(4, 5, 6)
+        else:
+            day, month, year = "01", *match.group(7, 8)
+        try:
+            parsed = date(int(year), int(month), int(day))
+        except ValueError:
+            unsupported.append(match.group())
+            return " "
+        # Month granularity is enough: inclusive month ends match exclusive next-month bounds.
+        keys = [f"{year}-{month}", parsed.isoformat(), (parsed + timedelta(days=1)).isoformat()]
+        if not any(key in evidence for key in keys):
+            unsupported.append(match.group())
+        return " "
+
+    for number in NUMBER.findall(DATES.sub(check_date, text)):
+        candidates = [number]
+        if re.fullmatch(r"\d{1,3}(?:\.\d{3})+(?:,\d+)?", number):
+            candidates.append(number.replace(".", "").replace(",", "."))
+        if not any(
+            has_numeric_evidence(item, exact, values) or (item.isdigit() and int(item) in counts)
+            for item in candidates
+        ):
+            unsupported.append(number)
+    return sorted(set(unsupported))
+
+
+class InsufficientEvidence(ValueError):
+    pass
+
+
 class DataAgent:
     def __init__(self, settings: Settings, model=None):
         self.settings = settings
@@ -96,6 +158,7 @@ class DataAgent:
             )
         self.model = model.bind_tools(list(self.tools.values()), parallel_tool_calls=False)
         graph = StateGraph(AgentState)
+        graph.add_node("resolve_period", self.resolve_period)
         graph.add_node("decide", self.decide)
         graph.add_node("metadata", self.metadata)
         graph.add_node("validate", self.validate)
@@ -103,7 +166,8 @@ class DataAgent:
         graph.add_node("evaluate", self.evaluate)
         graph.add_node("finish", self.finish)
         graph.add_node("clarify", self.clarify)
-        graph.add_edge(START, "decide")
+        graph.add_edge(START, "resolve_period")
+        graph.add_edge("resolve_period", "decide")
         graph.add_conditional_edges(
             "decide",
             self.route,
@@ -112,6 +176,7 @@ class DataAgent:
                 "validate": "validate",
                 "finish": "finish",
                 "clarify": "clarify",
+                "decide": "decide",
                 "stop": END,
             },
         )
@@ -132,19 +197,35 @@ class DataAgent:
         self.audit.write(state["run_id"], event)
         return [*state["events"], event]
 
-    def run(self, question: str, thread_id: str | None = None) -> AgentState:
+    @staticmethod
+    def today() -> date:
+        return datetime.now(ZoneInfo("America/Sao_Paulo")).date()
+
+    def run(
+        self, question: str, thread_id: str | None = None, context: list[dict] | None = None
+    ) -> AgentState:
         if not question.strip() or len(question) > 4000:
             raise ValueError("Informe uma pergunta com até 4.000 caracteres.")
         run_id = str(uuid4())
-        date = datetime.now(ZoneInfo("America/Sao_Paulo")).date().isoformat()
+        messages = [SystemMessage(content=SYSTEM_PROMPT + f"\nData atual: {self.today()}.")]
+        if context:
+            # Only prior questions and deterministic summaries; results and IDs stay in their runs.
+            turns = "\n".join(
+                f"- Pergunta: {turn['question'][:300]} | Resposta: {turn['answer'][:300]}"
+                for turn in context[-3:]
+            )
+            messages.append(
+                SystemMessage(
+                    content="Conversa anterior, apenas para interpretar referências da nova "
+                    "pergunta. IDs e resultados anteriores não estão disponíveis; consulte o "
+                    "banco novamente.\n" + turns
+                )
+            )
         return self.graph.invoke(
             {
                 "run_id": run_id,
                 "question": question,
-                "messages": [
-                    SystemMessage(content=SYSTEM_PROMPT + f"\nData atual: {date}."),
-                    HumanMessage(content=question),
-                ],
+                "messages": [*messages, HumanMessage(content=question)],
                 "results": [],
                 "events": [],
                 "failed_sql": [],
@@ -156,6 +237,11 @@ class DataAgent:
                 "status": "running",
                 "answer": None,
                 "clarification": None,
+                "clarifications": [],
+                "coverage": None,
+                "primary_id": None,
+                "presentation": None,
+                "pending": None,
                 "usage": {},
             },
             {"configurable": {"thread_id": thread_id or run_id}, "recursion_limit": 150},
@@ -170,12 +256,37 @@ class DataAgent:
             raise ValueError("Informe um esclarecimento com até 4.000 caracteres.")
         state = {
             **state,
-            "messages": [*state["messages"], HumanMessage(content=clarification)],
+            "messages": [
+                *state["messages"],
+                HumanMessage(content=f"Esclarecimento do usuário: {clarification}"),
+            ],
             "status": "running",
             "clarification": None,
+            "clarifications": [*state.get("clarifications", []), clarification],
             "error": None,
         }
         return self.graph.invoke(state, config)
+
+    def resolve_period(self, state: AgentState) -> dict:
+        # Runs once per investigation; a resumed clarification keeps the resolved period.
+        if state.get("coverage"):
+            return {}
+        coverage = self.database.date_coverage()
+        period = resolve_period(state["question"], coverage)
+        if not period:
+            return {"coverage": coverage}
+        return {
+            "coverage": coverage,
+            "period": period,
+            "messages": [
+                *state["messages"],
+                SystemMessage(
+                    content=f"Período resolvido para esta pergunta: {period}. Use exatamente "
+                    "esse intervalo nos filtros e informe-o nas premissas."
+                ),
+            ],
+            "events": self.event(state, "period", tool="resolve_period", status="resolved"),
+        }
 
     def decide(self, state: AgentState) -> dict:
         if (
@@ -229,6 +340,27 @@ class DataAgent:
                 attempt=state["model_calls"] + 1,
             )
             if len(response.tool_calls) != 1 or response.tool_calls[0]["name"] not in self.tools:
+                if state["corrections"] < self.settings.max_corrections:
+                    # A malformed turn is recoverable: the invalid reply is not kept.
+                    return {
+                        "messages": [
+                            *state["messages"],
+                            HumanMessage(
+                                content="Resposta inválida: chame exatamente uma das ferramentas."
+                            ),
+                        ],
+                        "pending": None,
+                        "corrections": state["corrections"] + 1,
+                        "model_calls": state["model_calls"] + 1,
+                        "iterations": state["iterations"] + 1,
+                        "events": self.event(
+                            {**state, "events": events},
+                            "evaluate",
+                            error_code="model_protocol",
+                            status="retry",
+                        ),
+                        "usage": counters,
+                    }
                 return {
                     "status": "failed",
                     "error": {
@@ -278,6 +410,8 @@ class DataAgent:
     def route(state: AgentState) -> str:
         if state["status"] != "running":
             return "stop"
+        if not state.get("pending"):
+            return "decide"
         return {
             "list_tables": "metadata",
             "inspect_schema": "metadata",
@@ -355,9 +489,14 @@ class DataAgent:
         sql = state["pending"]["args"]["sql"]
         try:
             result = self.database.execute(sql, f"q{state['queries']}")
+            payload = result.model_dump()
+            if result.status == "empty":
+                missing = self.database.missing_values(sql)
+                if missing:
+                    payload["aviso"] = "Vazio por filtro inexistente: " + "; ".join(missing)
             return {
                 "results": [*state["results"], result.model_dump()],
-                "messages": self.feedback(state, result.model_dump()),
+                "messages": self.feedback(state, payload),
                 "events": self.event(
                     state,
                     "execute",
@@ -421,35 +560,42 @@ class DataAgent:
                 )
             if any(results[key]["status"] == "truncated" for key in answer.evidence_ids):
                 raise ValueError("Resultado truncado: refine a consulta antes de concluir.")
-            evidence = json.dumps(
-                [
-                    {"rows": results[key]["rows"], "sql": results[key]["sql"]}
-                    for key in answer.evidence_ids
-                ],
-                ensure_ascii=False,
-            )
-            numbers = set(re.findall(r"\d+(?:[.,]\d+)?", evidence))
-            text = answer.summary + " " + " ".join(answer.assumptions)
-            claimed = re.findall(r"\d+(?:[.,]\d+)?", text)
-            values = [
-                value
-                for key in answer.evidence_ids
-                for row in results[key]["rows"]
-                for value in row
-                if isinstance(value, (int, float)) and not isinstance(value, bool)
-            ]
-            unsupported = sorted(
-                {number for number in claimed if not has_numeric_evidence(number, numbers, values)}
+            cited = [results[key] for key in answer.evidence_ids]
+            unsupported = unsupported_numbers(
+                answer.summary + " " + " ".join(answer.assumptions), cited
             )
             if unsupported:
                 raise ValueError(
                     f"Números sem suporte: {', '.join(unsupported)}. "
                     "Remova essas afirmações ou calcule-as em SQL antes de concluir."
                 )
+            if answer.primary_result_id and answer.primary_result_id not in answer.evidence_ids:
+                raise ValueError("A evidência principal deve estar entre as evidências citadas.")
+            primary = None
+            if answer.answerable and answer.evidence_ids:
+                primary, problems = select_primary(
+                    state["question"],
+                    [*state.get("clarifications", []), state.get("period") or ""],
+                    answer.model_dump(),
+                    results,
+                    self.database.list_tables(),
+                )
+                if primary:
+                    sql = results[primary]["sql"]
+                    problems = self.database.unfiltered_mentions(state["question"], sql)
+                    if results[primary]["status"] == "empty":
+                        problems += self.database.missing_values(sql)
+                if problems:
+                    raise InsufficientEvidence(
+                        "Evidência insuficiente para a pergunta: "
+                        + "; ".join(problems)
+                        + ". Execute a consulta adequada antes de concluir."
+                    )
             return {
                 "answer": answer.model_dump(),
+                "primary_id": primary,
                 "presentation": prepare_presentation(
-                    answer.model_dump(), state["results"]
+                    answer.model_dump(), state["results"], primary, state.get("coverage")
                 ).model_dump(),
                 "status": "completed",
                 "messages": self.feedback(state, {"status": "completed"}),
@@ -462,11 +608,14 @@ class DataAgent:
                 ),
             }
         except (ValueError, KeyError) as exc:
-            error = {"code": "inconsistent", "message": str(exc)[:200], "recoverable": True}
+            code = (
+                "insufficient_evidence" if isinstance(exc, InsufficientEvidence) else "inconsistent"
+            )
+            error = {"code": code, "message": str(exc)[:400], "recoverable": True}
             return {
                 "error": error,
                 "status": "failed",
-                "events": self.event(state, "finish", error_code="inconsistent"),
+                "events": self.event(state, "finish", tool="finish", error_code=code),
             }
 
     def clarify(self, state: AgentState) -> dict:

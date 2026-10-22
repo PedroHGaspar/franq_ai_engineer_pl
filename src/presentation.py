@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 from sqlglot import exp, parse_one
 from sqlglot.errors import ParseError
 
+from src.intent import PERIOD
 from src.models import ChartSpec, QueryResult
 
 
@@ -97,10 +98,58 @@ def is_ranking(result: QueryResult) -> bool:
         return False
 
 
-def prepare_presentation(answer: dict, results: list[dict]) -> Presentation:
+def numeric(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value)
+
+
+def trend_items(result: QueryResult) -> list[str]:
+    """First, last and peak value of each series when the rows form a period series."""
+    columns, rows = result.columns, result.rows
+    period = next(
+        (
+            i
+            for i in range(len(columns))
+            if all(isinstance(row[i], str) and PERIOD.match(row[i]) for row in rows)
+        ),
+        None,
+    )
+    measure = next(
+        (i for i in reversed(range(len(columns))) if all(numeric(row[i]) for row in rows)), None
+    )
+    others = [i for i in range(len(columns)) if i not in {period, measure}]
+    if period is None or measure is None or len(others) > 1:
+        return []
+    if len({row[period] for row in rows}) < 2:
+        return []
+    series: dict[str, list] = {}
+    for row in sorted(rows, key=lambda row: row[period]):
+        series.setdefault(str(row[others[0]]) if others else "Total", []).append(row)
+    items = []
+    for name, points in series.items():
+        first, last = points[0], points[-1]
+        peak = max(points, key=lambda row: row[measure])
+        items.append(
+            f"{name}: {display_value(first[measure])} em {display_value(first[period])} → "
+            f"{display_value(last[measure])} em {display_value(last[period])}; "
+            f"pico de {display_value(peak[measure])} em {display_value(peak[period])}"
+        )
+    return items
+
+
+def prepare_presentation(
+    answer: dict,
+    results: list[dict],
+    primary_id: str | None = None,
+    coverage: tuple[str, str] | None = None,
+) -> Presentation:
     evidence = {r["id"]: r for r in results if r["id"] in answer["evidence_ids"]}
     spec = ChartSpec.model_validate(answer["chart"])
-    source = spec.result_id or next(iter(answer["evidence_ids"]), None)
+    source = (
+        primary_id
+        or answer.get("primary_result_id")
+        or spec.result_id
+        or next(iter(answer["evidence_ids"]), None)
+    )
     if not evidence:
         return Presentation(
             kind="text",
@@ -112,8 +161,15 @@ def prepare_presentation(answer: dict, results: list[dict]) -> Presentation:
     result = QueryResult.model_validate(evidence[source])
     base = dict(result_id=source, title="Resultados da consulta")
     if not result.rows:
+        summary = (
+            "A consulta foi executada sem erros, mas não há registros para o período e os "
+            "filtros consultados. Isso indica ausência de registros, não falha da análise."
+        )
+        if coverage:
+            start, end = (display_value(value) for value in coverage)
+            summary += f" Registros disponíveis no banco: {start} a {end}."
         return Presentation(
-            **base, kind="table", summary="Nenhum registro encontrado para os filtros consultados."
+            result_id=source, kind="table", title="Nenhum registro encontrado", summary=summary
         )
     if result.status == "truncated":
         return Presentation(
@@ -121,16 +177,33 @@ def prepare_presentation(answer: dict, results: list[dict]) -> Presentation:
             kind="table",
             summary="Resultado parcial: não permite concluir totais ou rankings.",
         )
-    if len(result.columns) == 1 and len(result.rows) == 1:
-        value = result.rows[0][0]
-        if isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(value):
-            return Presentation(
-                kind="metric",
-                result_id=source,
-                title=label_for(result.columns[0]),
-                summary="Resultado para os filtros consultados.",
-                value=display_value(value),
-            )
+    if len(result.columns) == 1 and len(result.rows) == 1 and numeric(result.rows[0][0]):
+        return Presentation(
+            kind="metric",
+            result_id=source,
+            title=label_for(result.columns[0]),
+            summary="Resultado para os filtros consultados.",
+            value=display_value(result.rows[0][0]),
+        )
+    items = trend_items(result)
+    if items:
+        periods = [
+            value
+            for row in result.rows
+            for value in row
+            if isinstance(value, str) and PERIOD.match(value)
+        ]
+        return Presentation(
+            result_id=source,
+            kind="line" if spec.kind == "line" else "table",
+            title="Evolução por período",
+            summary=(
+                f"Série de {display_value(min(periods))} a {display_value(max(periods))}, com "
+                "primeiro e último valor de cada série e seu pico. Combinações ausentes não "
+                "foram preenchidas com zero; períodos nas bordas do filtro podem estar incompletos."
+            ),
+            items=items,
+        )
     if is_ranking(result):
         return Presentation(
             kind="ranking",
@@ -156,6 +229,22 @@ def prepare_presentation(answer: dict, results: list[dict]) -> Presentation:
         except (ValueError, TypeError):
             pass
     kind = "bar" if spec.kind == "bar" else "table"
+    if (
+        2 <= len(result.rows) <= 20
+        and len(result.columns) == 2
+        and all(isinstance(row[0], str) and numeric(row[1]) for row in result.rows)
+    ):
+        ordered = sorted(result.rows, key=lambda row: -row[1])
+        return Presentation(
+            result_id=source,
+            title=f"{label_for(result.columns[1])} por {label_for(result.columns[0]).lower()}",
+            kind=kind,
+            summary=(
+                f"Maior valor: {ordered[0][0]} ({display_value(ordered[0][1])}); "
+                f"menor: {ordered[-1][0]} ({display_value(ordered[-1][1])})."
+            ),
+            items=[f"{row[0]} — {display_value(row[1])}" for row in ordered],
+        )
     return Presentation(
         **base,
         kind=kind,

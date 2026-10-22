@@ -8,6 +8,7 @@ import sqlglot
 from sqlglot import exp
 
 from src.config import Settings
+from src.intent import normalize, singular_text
 from src.models import QueryResult
 
 # Functions are checked again by SQLite after name resolution.
@@ -151,6 +152,118 @@ class Database:
                     "candidate_relationships": candidates,
                 }
         return result
+
+    def date_coverage(self) -> tuple[str, str] | None:
+        """Discovers the global interval of ISO date columns, without a predefined schema."""
+        pattern = "[12][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]*"
+        bounds = []
+        with self.connect() as connection:
+            for table in self.list_tables():
+                for column in connection.execute(
+                    f"PRAGMA table_info({quote_identifier(table)})"
+                ).fetchall():
+                    if column[2].upper() not in {"TEXT", "DATE", "DATETIME", "TIMESTAMP"}:
+                        continue
+                    name = quote_identifier(column[1])
+                    row = connection.execute(
+                        f"SELECT MIN({name}), MAX({name}), COUNT({name}), "
+                        f"SUM({name} GLOB ?) FROM {quote_identifier(table)}",
+                        (pattern,),
+                    ).fetchone()
+                    if row[2] and row[2] == row[3]:
+                        bounds.append(row[:2])
+        if not bounds:
+            return None
+        return min(b[0] for b in bounds)[:10], max(b[1] for b in bounds)[:10]
+
+    def unfiltered_mentions(self, question: str, sql: str) -> list[str]:
+        """Categorical values named in the question that the query neither filters nor groups."""
+        text = f" {singular_text(normalize(question))} "
+        tree = sqlglot.parse_one(validate_sql(sql), read="sqlite")
+        known = set(self.list_tables())
+        tables = {t.name for t in tree.find_all(exp.Table) if t.name in known}
+        literals = [
+            normalize(item.this).strip("%") for item in tree.find_all(exp.Literal) if item.is_string
+        ]
+        grouped = {
+            column.name
+            for group in tree.find_all(exp.Group)
+            for column in group.find_all(exp.Column)
+        }
+        problems = []
+        with self.connect() as connection:
+            for table in sorted(tables):
+                for column in connection.execute(f"PRAGMA table_info({quote_identifier(table)})"):
+                    if column[2].upper() != "TEXT" or column[1] in grouped:
+                        continue
+                    name = quote_identifier(column[1])
+                    values = connection.execute(
+                        f"SELECT DISTINCT {name} FROM {quote_identifier(table)} "
+                        f"WHERE {name} IS NOT NULL LIMIT 13"
+                    ).fetchall()
+                    # Only categorical columns: short lists of business values.
+                    if len(values) > 12:
+                        continue
+                    for (value,) in values:
+                        key = singular_text(normalize(str(value)))
+                        filtered = any(
+                            len(literal) >= 3 and literal in normalize(str(value))
+                            for literal in literals
+                        )
+                        if f" {key} " in text and not filtered:
+                            problems.append(
+                                f"a pergunta cita '{value}', mas a consulta não filtra "
+                                f"{table}.{column[1]} por esse valor"
+                            )
+        return problems
+
+    def missing_values(self, sql: str) -> list[str]:
+        """Text filters whose literal never occurs in the filtered column, explaining empties."""
+        tree = sqlglot.parse_one(validate_sql(sql), read="sqlite")
+        known = set(self.list_tables())
+        aliases = {t.alias_or_name: t.name for t in tree.find_all(exp.Table) if t.name in known}
+        problems = []
+        with self.connect() as connection:
+            columns = {
+                table: {
+                    row[1]
+                    for row in connection.execute(f"PRAGMA table_info({quote_identifier(table)})")
+                }
+                for table in set(aliases.values())
+            }
+            for node in tree.find_all(exp.EQ, exp.In):
+                column = node.this
+                literals = [node.expression] if isinstance(node, exp.EQ) else node.expressions
+                literals = [item for item in literals if isinstance(item, exp.Literal)]
+                if not isinstance(column, exp.Column) or not any(i.is_string for i in literals):
+                    continue
+                owners = (
+                    [aliases[column.table]]
+                    if column.table in aliases
+                    else [t for t, names in columns.items() if column.name in names]
+                )
+                if len(owners) != 1 or column.name not in columns[owners[0]]:
+                    continue
+                table, name = quote_identifier(owners[0]), quote_identifier(column.name)
+                for literal in (item for item in literals if item.is_string):
+                    found = connection.execute(
+                        f"SELECT 1 FROM {table} WHERE {name} = ? LIMIT 1", (literal.this,)
+                    ).fetchone()
+                    if found:
+                        continue
+                    values = connection.execute(
+                        f"SELECT DISTINCT {name} FROM {table} WHERE {name} IS NOT NULL LIMIT 13"
+                    ).fetchall()
+                    # Only short categorical lists are shown; long lists may be personal data.
+                    listed = (
+                        f" (valores existentes: {', '.join(str(v[0]) for v in values)})"
+                        if len(values) <= 12
+                        else ""
+                    )
+                    problems.append(
+                        f"o valor '{literal.this}' não existe em {owners[0]}.{column.name}{listed}"
+                    )
+        return problems
 
     def execute(self, sql: str, result_id: str) -> QueryResult:
         normalized = validate_sql(sql)
