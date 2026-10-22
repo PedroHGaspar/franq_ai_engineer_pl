@@ -193,7 +193,7 @@ def test_ranking_and_unverified_narrative_in_transparency(settings, monkeypatch)
     assert not app.info
     original = next(item for item in app.expander if "original do modelo" in item.label)
     assert any(item.value == "Não existem clientes." for item in original.text)
-    assert any("demonstração não oficial" in item.value for item in app.caption)
+    assert any("Desafio Técnico 1" in item.value for item in app.caption)
 
 
 def test_optional_original_banner(monkeypatch):
@@ -204,7 +204,9 @@ def test_optional_original_banner(monkeypatch):
     monkeypatch.setenv("ENABLE_PAID_API", "false")
     app = AppTest.from_file(Path("app.py").resolve(), default_timeout=TIMEOUT).run()
     assert not app.exception
-    assert app.get("image")
+    # Rendered as plain HTML, so no fullscreen button is attached to the banner.
+    assert not app.get("image")
+    assert any('alt="Franq"' in item.proto.body for item in app.get("html"))
 
 
 def test_unexpected_error_names_its_type_without_details(settings, monkeypatch):

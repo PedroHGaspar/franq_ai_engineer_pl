@@ -1,3 +1,4 @@
+from base64 import b64encode
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,10 +20,15 @@ st.html(
 )
 banner = Path(__file__).resolve().parent / "assets" / "franq-banner.png"
 if banner.is_file():
-    st.image(str(banner), width="stretch")
+    # Plain HTML image: a decorative banner does not need Streamlit's fullscreen button.
+    encoded = b64encode(banner.read_bytes()).decode()
+    st.html(
+        f'<img src="data:image/png;base64,{encoded}" alt="Franq" '
+        'style="width:100%;border-radius:0.5rem;">'
+    )
     # The logo area of the banner stays visible in the sidebar while the conversation scrolls.
     st.logo(Image.open(banner).crop((1980, 30, 2360, 160)), size="large")
-st.caption("Desafio técnico — demonstração não oficial")
+st.caption("Desafio Técnico 1 · Engenheiro(a) de IA")
 st.title("Assistente de Dados")
 st.write("Transforme perguntas de negócio em respostas com evidências.")
 
@@ -223,7 +229,7 @@ with st.sidebar:
         st.session_state.pop("agent", None)
         st.session_state.pop("pending_thread", None)
         st.rerun()
-    st.caption("Especifique anos e períodos. Nomes e e-mails não são necessários às análises.")
+    st.caption("Pergunte em linguagem natural; cada resposta mostra como foi obtida.")
     with st.expander("Sobre a sessão"):
         st.caption(f"Modelo: {settings.openai_model}")
         st.caption(f"Teto local configurado: US$ {settings.api_budget_usd:.2f}")
@@ -235,7 +241,7 @@ if not settings.enable_paid_api:
     )
 
 question = st.chat_input(
-    "Pergunte sobre os dados ou responda ao esclarecimento pendente",
+    "Faça uma pergunta sobre os dados",
     disabled=not settings.enable_paid_api or processing,
     max_chars=4000,
 )
@@ -260,11 +266,13 @@ if not history:
         )
         with st.container(border=True):
             st.markdown(
-                "**Sugestões para experimentar**\n\n"
+                "**Perguntas do desafio para experimentar**\n\n"
+                "- Liste os 5 estados com maior número de clientes que compraram via app em maio.\n"
                 "- Quantos clientes interagiram com campanhas de WhatsApp em 2024?\n"
-                "- Mostre um gráfico de barras com as reclamações não resolvidas por canal.\n"
-                "- Mostre a evolução mensal das reclamações por canal de julho de 2024 "
-                "a julho de 2025."
+                "- Quais categorias de produto tiveram o maior número de compras em média "
+                "por cliente?\n"
+                "- Qual o número de reclamações não resolvidas por canal?\n"
+                "- Qual a tendência de reclamações por canal no último ano?"
             )
 
 for index, entry in enumerate(history):
