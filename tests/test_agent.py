@@ -110,21 +110,19 @@ def test_invalid_evidence(settings):
     assert state["error"]["code"] == "inconsistent" and state["answer"] is None
 
 
-def test_clarification_resumes_checkpoint(settings):
+def test_model_clarification_resumes_checkpoint(settings):
     agent = DataAgent(
         settings,
         ScriptedModel(
-            ("clarify", {"question": "Qual ano?"}),
-            (
-                "execute_query",
-                {"sql": "SELECT COUNT(*) n FROM sales WHERE sold_on >= '2025-01-01'"},
-            ),
+            ("clarify", {"question": "Valor bruto ou líquido?"}),
+            ("execute_query", {"sql": "SELECT SUM(amount) total FROM sales"}),
             finish(),
         ),
     )
-    assert agent.run("Vendas em maio", "session")["status"] == "clarification"
-    result = agent.resume("session", "2025")
+    assert agent.run("Qual o total vendido?", "session")["status"] == "clarification"
+    result = agent.resume("session", "bruto")
     assert result["status"] == "completed" and result["model_calls"] == 3
+    assert result["clarifications"] == ["bruto"]
 
 
 def test_paid_api_disabled(settings):

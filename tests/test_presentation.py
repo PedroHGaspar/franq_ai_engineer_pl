@@ -88,7 +88,8 @@ def test_missing_rows_are_not_zero_metric():
     answer, results = payload([], ["total"], "SELECT COUNT(*) total FROM vendas")
     view = prepare_presentation(answer, results)
     assert view.kind == "table" and view.value is None
-    assert "Nenhum registro" in view.summary
+    assert view.title == "Nenhum registro encontrado"
+    assert "ausência de registros" in view.summary
 
 
 def test_invented_chart_source_is_rejected():

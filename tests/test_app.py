@@ -5,10 +5,13 @@ from streamlit.testing.v1 import AppTest
 from src.agent import DataAgent
 from tests.conftest import ScriptedModel, finish
 
+# Cold imports through WSL on a Windows drive exceed 15 s; this is not a functional limit.
+TIMEOUT = 60
+
 
 def test_app_starts_without_paid_api(monkeypatch):
     monkeypatch.setenv("ENABLE_PAID_API", "false")
-    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=15).run()
+    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=TIMEOUT).run()
     assert not app.exception
     assert app.chat_input[0].disabled
     assert "desabilitadas" in app.info[0].value
@@ -24,7 +27,7 @@ def test_app_question_table_and_transparency(settings, monkeypatch):
     )
     monkeypatch.setenv("ENABLE_PAID_API", "true")
     monkeypatch.setattr("src.agent.DataAgent", lambda settings: agent)
-    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=15).run()
+    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=TIMEOUT).run()
     app.chat_input[0].set_value("Clientes por região").run()
     assert not app.exception
     assert list(app.dataframe[0].value.columns) == ["region", "n"]
@@ -37,22 +40,22 @@ def test_app_question_table_and_transparency(settings, monkeypatch):
 def start_app(monkeypatch, agent):
     monkeypatch.setenv("ENABLE_PAID_API", "true")
     monkeypatch.setattr("src.agent.DataAgent", lambda settings: agent)
-    return AppTest.from_file(Path("app.py").resolve(), default_timeout=15).run()
+    return AppTest.from_file(Path("app.py").resolve(), default_timeout=TIMEOUT).run()
 
 
 def test_clarification_resume_history_and_clear(settings, monkeypatch):
     agent = DataAgent(
         settings,
         ScriptedModel(
-            ("clarify", {"question": "Qual ano?"}),
+            ("clarify", {"question": "Todos os cadastros ou apenas compradores?"}),
             ("execute_query", {"sql": "SELECT COUNT(*) n FROM people"}),
             finish(),
         ),
     )
     app = start_app(monkeypatch, agent)
-    app.chat_input[0].set_value("Clientes em maio").run()
+    app.chat_input[0].set_value("Quantos clientes temos?").run()
     assert app.session_state["pending_thread"]
-    assert any("Qual ano?" in item.value for item in app.info)
+    assert any("compradores" in item.value for item in app.info)
     app.chat_input[0].set_value("2025").run()
     assert not app.exception
     assert app.session_state["pending_thread"] is None
@@ -109,7 +112,8 @@ def test_empty_and_incompatible_chart(settings, monkeypatch):
     )
     app = start_app(monkeypatch, agent)
     app.chat_input[0].set_value("Sem dados").run()
-    assert any("Nenhum registro" in item.value for item in app.info)
+    assert any(item.value == "Nenhum registro encontrado" for item in app.subheader)
+    assert any("ausência de registros, não falha" in item.value for item in app.markdown)
     app.chat_input[0].set_value("Gráfico incompatível").run()
     assert not app.exception
     assert any("não são compatíveis" in item.value for item in app.info)
@@ -127,19 +131,28 @@ def test_failure_preserves_history_and_allows_retry(settings, monkeypatch):
     )
     app = start_app(monkeypatch, agent)
     app.chat_input[0].set_value("Primeira tentativa").run()
-    assert app.error
-    assert not app.session_state["busy"]
+    assert app.error and "não foi concluída" in app.error[0].value
+    assert not app.chat_input[0].disabled
     app.chat_input[0].set_value("Nova tentativa").run()
     assert not app.exception
     assert len(app.session_state["history"]) == 2
     assert app.session_state["history"][-1]["state"]["status"] == "completed"
 
 
-def test_busy_session_disables_new_submission(settings, monkeypatch):
-    app = start_app(monkeypatch, DataAgent(settings, ScriptedModel()))
-    app.session_state["busy"] = True
+def test_pending_entry_disables_input_and_runs_once(settings, monkeypatch):
+    agent = DataAgent(
+        settings,
+        ScriptedModel(("execute_query", {"sql": "SELECT COUNT(*) n FROM people"}), finish()),
+    )
+    app = start_app(monkeypatch, agent)
+    app.session_state["history"] = [
+        {"id": "e1", "question": "Total de pessoas", "state": None, "thread": None}
+    ]
     app.run()
-    assert app.chat_input[0].disabled
+    assert app.session_state["history"][0]["state"]["status"] == "completed"
+    app.run()
+    assert not app.exception and not app.chat_input[0].disabled
+    assert agent.model.messages and len(agent.model.messages) == 2
 
 
 def test_scalar_result_renders_metric(settings, monkeypatch):
@@ -176,7 +189,8 @@ def test_ranking_and_unverified_narrative_in_transparency(settings, monkeypatch)
     app.chat_input[0].set_value("Ranking de clientes").run()
     assert not app.exception
     assert any(item.value == "1. Sul — 2" for item in app.text)
-    assert any("não foi confirmada" in item.value for item in app.info)
+    # Problem D: a verified answer must not carry an unconditional "not confirmed" alert.
+    assert not app.info
     original = next(item for item in app.expander if "original do modelo" in item.label)
     assert any(item.value == "Não existem clientes." for item in original.text)
     assert any("demonstração não oficial" in item.value for item in app.caption)
@@ -188,6 +202,19 @@ def test_optional_original_banner(monkeypatch):
     if not Path("assets/franq-banner.png").exists():
         pytest.skip("Marca privada opcional ausente")
     monkeypatch.setenv("ENABLE_PAID_API", "false")
-    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=15).run()
+    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=TIMEOUT).run()
     assert not app.exception
     assert app.get("image")
+
+
+def test_unexpected_error_names_its_type_without_details(settings, monkeypatch):
+    agent = DataAgent(settings, ScriptedModel())
+
+    def broken(*args, **kwargs):
+        raise TypeError("secret-detail")
+
+    monkeypatch.setattr(agent, "run", broken)
+    app = start_app(monkeypatch, agent)
+    app.chat_input[0].set_value("Total de vendas").run()
+    assert "TypeError" in app.error[0].value and "reinicie o servidor" in app.error[0].value
+    assert "secret-detail" not in str(app.session_state["history"])
