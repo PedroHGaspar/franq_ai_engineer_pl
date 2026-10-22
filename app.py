@@ -14,52 +14,99 @@ st.title("Assistente de Dados")
 st.caption("Investigue perguntas de negócio com consultas rastreáveis ao SQLite.")
 
 
-def render_result(state: dict) -> None:
-    if state["status"] == "clarification":
-        st.info(state["clarification"])
-    elif state.get("answer"):
-        answer = state["answer"]
-        st.write(answer["summary"])
-        for assumption in answer["assumptions"]:
-            st.caption(assumption)
-        results = {r["id"]: r for r in state["results"]}
-        for index, key in enumerate(answer["evidence_ids"]):
-            result = QueryResult.model_validate(results[key])
-            if result.status == "empty":
-                st.info("Nenhum registro encontrado para os filtros consultados.")
-            else:
-                st.dataframe(
-                    pd.DataFrame(result.rows, columns=result.columns),
-                    hide_index=True,
-                    width="stretch",
-                )
-                if index == 0:
-                    chart = build_chart(result, ChartSpec.model_validate(answer["chart"]))
-                    if chart is not None:
-                        st.plotly_chart(
-                            chart, width="stretch", key=f"chart-{state['run_id']}-{key}"
-                        )
-    else:
-        st.error(state.get("error", {}).get("message", "Não foi possível concluir a investigação."))
+def render_transparency(state: dict) -> None:
     with st.expander("Transparência operacional"):
         st.caption(f"Execução: {state['run_id']}")
         st.write(
             f"Chamadas ao modelo: {state['model_calls']} · "
             f"Tentativas SQL: {state['queries']} · Correções: {state['corrections']}"
         )
-        if state.get("usage"):
-            st.json(state["usage"])
+        labels = {
+            "metadata": "Descoberta do banco",
+            "validate": "Validação SQL",
+            "execute": "Execução SQL",
+            "evaluate": "Avaliação",
+            "decide": "Seleção de ferramenta",
+            "finish": "Conclusão",
+            "clarify": "Esclarecimento",
+        }
+        steps = []
         for event in state["events"]:
-            st.write({key: value for key, value in event.items() if key != "sql"})
-            if "sql" in event:
-                st.code(event["sql"], language="sql")
+            steps.append(
+                {
+                    "Etapa": labels.get(event["stage"], event["stage"]),
+                    "Ferramenta": event.get("tool", "—"),
+                    "Duração (ms)": event.get("duration_ms"),
+                    "Estado / erro": event.get("error_code") or event.get("status", "—"),
+                }
+            )
+        if steps:
+            st.dataframe(pd.DataFrame(steps), hide_index=True, width="stretch")
+        for event in state["events"]:
+            if event.get("metadata") is not None:
+                with st.expander(f"Metadados · {event.get('tool')}"):
+                    st.json(event["metadata"], expanded=False)
+            if event.get("message"):
+                st.caption(f"Ocorrência: {event['message']}")
+        executed = {r["sql"] for r in state["results"]}
+        shown = set()
+        for event in state["events"]:
+            sql = event.get("sql")
+            if sql and sql not in executed and sql not in shown:
+                st.caption("SQL gerado · antes da normalização ou sem resultado concluído")
+                st.code(sql, language="sql")
+                shown.add(sql)
         for result in state["results"]:
-            st.caption(f"{result['id']} · {result['status']} · {result['duration_ms']} ms")
+            with st.expander(
+                f"{result['id']} · SQL executado · {result['status']} · "
+                f"{result['duration_ms']:.1f} ms"
+            ):
+                st.code(result["sql"], language="sql")
+                st.dataframe(
+                    pd.DataFrame(result["rows"], columns=result["columns"]),
+                    hide_index=True,
+                    width="stretch",
+                )
+        if state.get("usage"):
+            with st.expander("Consumo registrado"):
+                st.json(state["usage"], expanded=False)
+
+
+def render_result(state: dict) -> None:
+    if state["status"] == "clarification":
+        st.info(state["clarification"])
+        st.caption("Responda no campo abaixo para continuar esta investigação.")
+    elif state.get("answer"):
+        answer = state["answer"]
+        st.write(answer["summary"])
+        for assumption in answer["assumptions"]:
+            st.caption(assumption)
+        results = {r["id"]: r for r in state["results"]}
+        spec = ChartSpec.model_validate(answer["chart"])
+        source = spec.result_id or next(iter(answer["evidence_ids"]), None)
+        for key in answer["evidence_ids"]:
+            result = QueryResult.model_validate(results[key])
+            if result.status == "empty":
+                st.info("Nenhum registro encontrado para os filtros consultados.")
+                continue
+            if key == source:
+                chart = build_chart(result, spec)
+                if chart is not None:
+                    st.plotly_chart(chart, width="stretch", key=f"chart-{state['run_id']}-{key}")
+                elif spec.kind in {"bar", "line"}:
+                    st.info(
+                        "Os dados não são compatíveis com o gráfico solicitado. Confira a tabela."
+                    )
             st.dataframe(
-                pd.DataFrame(result["rows"], columns=result["columns"]),
+                pd.DataFrame(result.rows, columns=result.columns),
                 hide_index=True,
                 width="stretch",
             )
+    else:
+        st.error(
+            (state.get("error") or {}).get("message", "Não foi possível concluir a investigação.")
+        )
+    render_transparency(state)
 
 
 try:
@@ -85,6 +132,10 @@ if not settings.enable_paid_api:
     )
 
 history = st.session_state.setdefault("history", [])
+if not history:
+    st.subheader("O que você gostaria de investigar?")
+    st.write("Pergunte sobre clientes, compras, campanhas ou atendimento.")
+    st.caption("Inclua o período desejado. Você também pode pedir uma tabela ou um gráfico.")
 for entry in history:
     with st.chat_message("user"):
         st.write(entry["question"])
@@ -93,10 +144,11 @@ for entry in history:
 
 question = st.chat_input(
     "Pergunte sobre os dados ou responda ao esclarecimento pendente",
-    disabled=not settings.enable_paid_api,
+    disabled=not settings.enable_paid_api or st.session_state.get("busy", False),
     max_chars=4000,
 )
-if question:
+if question and not st.session_state.get("busy", False):
+    st.session_state.busy = True
     with st.chat_message("user"):
         st.write(question)
     try:
@@ -113,7 +165,24 @@ if question:
         history.append({"question": question, "state": state})
         with st.chat_message("assistant"):
             render_result(state)
-    except (DatabaseError, ValueError) as exc:
-        st.error(str(exc))
-    except Exception:
-        st.error("Falha inesperada na execução. Consulte a configuração e os logs locais.")
+    except Exception as exc:
+        message = (
+            str(exc)
+            if isinstance(exc, DatabaseError)
+            else ("Não foi possível concluir. Verifique a configuração e tente novamente.")
+        )
+        state = {
+            "run_id": str(uuid4()),
+            "status": "failed",
+            "error": {"message": message},
+            "events": [],
+            "results": [],
+            "model_calls": 0,
+            "queries": 0,
+            "corrections": 0,
+        }
+        history.append({"question": question, "state": state})
+        with st.chat_message("assistant"):
+            render_result(state)
+    finally:
+        st.session_state.busy = False

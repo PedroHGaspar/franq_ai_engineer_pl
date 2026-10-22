@@ -15,6 +15,10 @@ class QueryResult(BaseModel):
 
 class ChartSpec(BaseModel):
     kind: Literal["table", "bar", "line", "none"] = "table"
+    result_id: str | None = Field(
+        None, description="ID da evidência que fornece os dados do gráfico"
+    )
+    title: str | None = Field(None, max_length=160)
     x: str | None = None
     y: str | None = None
     color: str | None = None

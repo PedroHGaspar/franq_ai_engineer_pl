@@ -46,7 +46,9 @@ Números no texto devem constar nas evidências ou nos filtros SQL. Arredondamen
 Não acrescente totais, quantidade de grupos, percentuais ou números de etapas no texto sem
 consulta que os tenha calculado explicitamente. IDs de evidência pertencem a evidence_ids.
 Escolha table para listas, bar para comparações, line para datas e none se não há gráfico útil.
-As colunas do gráfico devem existir na primeira evidência. Nunca invente séries nem preencha
+Respeite pedidos explícitos de formato quando compatíveis com os dados. Para gráficos, indique
+result_id de uma evidência, título curto, x, y e color para separar séries como canais.
+As colunas do gráfico devem existir nessa evidência. Nunca invente séries nem preencha
 meses ausentes como zero sem justificar a cobertura temporal.
 """
 
@@ -301,6 +303,7 @@ class DataAgent:
                     state,
                     "metadata",
                     tool=state["pending"]["name"],
+                    metadata=result,
                     duration_ms=round((time.monotonic() - started) * 1000, 2),
                 ),
             }
@@ -404,6 +407,8 @@ class DataAgent:
             results = {r["id"]: r for r in state["results"]}
             if any(key not in results for key in answer.evidence_ids):
                 raise ValueError("Evidência inexistente.")
+            if answer.chart.result_id and answer.chart.result_id not in answer.evidence_ids:
+                raise ValueError("O gráfico deve utilizar uma evidência citada na resposta.")
             inspected = any(
                 event.get("tool") == "inspect_schema"
                 for event in state["events"]

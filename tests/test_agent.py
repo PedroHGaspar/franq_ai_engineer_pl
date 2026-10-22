@@ -206,3 +206,17 @@ def test_provider_configuration_error_is_not_transient(settings):
 )
 def test_numeric_evidence_accepts_only_supported_rounding(text, value, supported):
     assert has_numeric_evidence(text, {str(value)}, [value]) == supported
+
+
+def test_chart_cannot_reference_uncited_query(settings):
+    state = DataAgent(
+        settings,
+        ScriptedModel(
+            ("execute_query", {"sql": "SELECT region,COUNT(*) n FROM people GROUP BY region"}),
+            finish(chart={"kind": "bar", "x": "region", "y": "n", "result_id": "q99"}),
+            finish(chart={"kind": "bar", "x": "region", "y": "n", "result_id": "q1"}),
+        ),
+    ).run("Comparar regiões")
+    assert state["status"] == "completed"
+    assert state["corrections"] == 1
+    assert state["answer"]["chart"]["result_id"] == "q1"

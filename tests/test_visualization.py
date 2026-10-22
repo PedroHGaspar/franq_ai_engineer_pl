@@ -30,3 +30,28 @@ def test_bar_and_line_use_real_values():
 )
 def test_invalid_charts_fall_back_to_table(data, spec):
     assert select_chart(data, spec).kind == "table"
+
+
+def test_line_series_keep_dates_and_values():
+    data = result(
+        ["mes", "canal", "total"],
+        [
+            ["2025-02-01", "Chat", 3],
+            ["2025-01-01", "Chat", 1],
+            ["2025-01-01", "Telefone", 2],
+            ["2025-02-01", "Telefone", 4],
+        ],
+    )
+    chart = build_chart(data, ChartSpec(kind="line", x="mes", y="total", color="canal"))
+    assert {trace.name: list(trace.y) for trace in chart.data} == {
+        "Chat": [1, 3],
+        "Telefone": [2, 4],
+    }
+    assert all(str(trace.x[0]).startswith("2025-01-01") for trace in chart.data)
+    assert chart.layout.xaxis.title.text == "Mes"
+
+
+@pytest.mark.parametrize("invalid", [None, float("nan"), float("inf")])
+def test_nonfinite_values_do_not_produce_chart(invalid):
+    data = result(["canal", "total"], [["Chat", invalid], ["Telefone", 4]])
+    assert build_chart(data, ChartSpec(kind="bar", x="canal", y="total")) is None

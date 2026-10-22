@@ -61,12 +61,13 @@ def test_reference_questions(tmp_path):
     assert [tuple(row) for row in means.rows] == expected
 
 
-def test_monthly_trend_against_independent_python(tmp_path):
+@pytest.mark.parametrize("start,end", [("2024-07-23", "2025-07-23"), ("2024-07-01", "2025-08-01")])
+def test_monthly_trend_against_independent_python(tmp_path, start, end):
     database = Database(Settings(_env_file=None, database_path=ORIGINAL, local_dir=tmp_path))
     result = database.execute(
-        """SELECT substr(data_contato,1,7) mes,canal,COUNT(*) n
+        f"""SELECT substr(data_contato,1,7) mes,canal,COUNT(*) n
         FROM suporte WHERE tipo_contato='Reclamação'
-        AND data_contato>='2024-07-23' AND data_contato<'2025-07-23'
+        AND data_contato>='{start}' AND data_contato<'{end}'
         GROUP BY mes,canal ORDER BY mes,canal""",
         "q1",
     )
@@ -74,7 +75,7 @@ def test_monthly_trend_against_independent_python(tmp_path):
         rows = connection.execute("SELECT data_contato,canal,tipo_contato FROM suporte").fetchall()
     expected = {}
     for date, channel, kind in rows:
-        if kind == "Reclamação" and "2024-07-23" <= date < "2025-07-23":
+        if kind == "Reclamação" and start <= date < end:
             key = (date[:7], channel)
             expected[key] = expected.get(key, 0) + 1
     assert result.rows == [[*key, value] for key, value in sorted(expected.items())]
