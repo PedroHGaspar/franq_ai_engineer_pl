@@ -29,6 +29,11 @@ python -m streamlit run app.py --server.address 127.0.0.1
 
 Abra **http://localhost:8501** no navegador do Windows, inclusive ao executar no WSL.
 Mantenha o terminal aberto; `Ctrl+C` encerra o servidor. A aplicação escuta apenas localmente.
+Após atualizar o código (ex.: `git pull`) ou o `.env`, encerre com `Ctrl+C` e execute de novo:
+o Streamlit mantém em memória os módulos de `src/` já carregados.
+Períodos relativos usam os dados mais recentes do banco: “em maio” sem ano é o maio mais
+recente com registros e “último ano” são os 12 meses até o último registro. A resposta informa
+o período considerado.
 No primeiro início, deixe o campo de e-mail do Streamlit vazio, se solicitado.
 
 Coloque `anexo_desafio_1.db` na raiz ou ajuste `DATABASE_PATH` no `.env`.
@@ -85,6 +90,15 @@ na sessão; não use a interface como serviço público sem controles adicionais
 Gráficos identificam sua consulta de origem, com eixos e séries validados; dados incompatíveis
 permanecem em tabela. Esclarecimentos são respondidos no mesmo campo de perguntas.
 
+Antes do modelo, meses sem ano e “último ano/semestre/trimestre/mês” são resolvidos pela
+cobertura de datas descoberta no banco, e o intervalo é informado ao modelo. Ao concluir,
+a evidência principal precisa ser compatível com a intenção: contagens e comparações exigem agregação, tendências exigem agrupamento por
+período (e pela dimensão pedida), rankings exigem ordenação, anos e meses pedidos devem constar
+nos filtros e contagens de entidades fora de sua tabela exigem `COUNT(DISTINCT)`. Consultas de
+descoberta não são aceitas como resposta; sem evidência suficiente dentro dos limites, a
+interface informa que a análise não foi concluída. Cada pergunta tem ID e estado próprios;
+perguntas seguintes recebem apenas perguntas e sínteses anteriores, nunca SQL ou linhas.
+
 ## Perguntas e testes
 
 ```bash
@@ -108,7 +122,8 @@ Referências verificadas por SQL local (não por LLM real):
 - Reclamações mensais por canal entre **23/07/2024 e 22/07/2025**, comparadas a Python.
 - Pergunta inédita: clientes que nunca compraram pelo App, validada por diferença de conjuntos.
 
-“Maio”, “último ano” e o denominador de médias precisam de contexto explícito.
+“Maio” e “último ano” são resolvidos pelos dados disponíveis; o denominador de médias é
+declarado na interpretação adotada.
 Os resumos de gasto/última compra em `clientes` divergem dos eventos em `compras`;
 as análises de compras devem considerar essa limitação. O agente deve descobrir
 essas condições pelos dados, não por consultas predefinidas no código de produção.
@@ -123,8 +138,12 @@ A interface foi inspecionada em Chromium desktop/mobile com simulações e respo
 A bateria complementar comprovou seleção real de barras e linhas, com SQL e pontos conferidos.
 O texto da tendência apresentou uma afirmação não sustentada sobre canais ausentes em julho/2025;
 essa resposta textual não foi aprovada, embora consulta e gráfico estejam corretos.
-Agora a apresentação usa sínteses determinísticas dos resultados, preservando o texto original
-como não verificado na transparência. O banner local é opcional; veja `assets/README.md`.
+Agora a apresentação usa sínteses determinísticas dos resultados (métrica, ranking, comparação
+ou primeiro/último/pico de cada série) e mantém o texto original do modelo na transparência,
+com números conferidos. As regras de intenção são heurísticas lexicais em português e podem
+não reconhecer formulações incomuns. A bateria conversacional usa modelos simulados; as
+correções ainda não foram revalidadas com o LLM real. O banner local é opcional; veja
+`assets/README.md`.
 As checagens numéricas não detectam toda
 conclusão semântica incorreta; comparar resposta, SQL e referência continua necessário.
 As relações inferidas por nome/tipo são hipóteses. Checkpoints desaparecem ao encerrar
