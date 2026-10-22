@@ -1,4 +1,4 @@
-from math import isfinite
+from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
@@ -8,11 +8,15 @@ from src.agent import DataAgent
 from src.config import Settings
 from src.database import DatabaseError
 from src.models import ChartSpec, QueryResult
+from src.presentation import display_value, label_for, prepare_presentation
 from src.visualization import build_chart
 
 st.set_page_config(page_title="Franq · Assistente de Dados", page_icon="📊", layout="centered")
 st.html("<style>.block-container {padding-top: 4rem; padding-bottom: 6rem;}</style>")
-st.caption("FRANQ  /  INTELIGÊNCIA DE DADOS")
+banner = Path(__file__).resolve().parent / "assets" / "franq-banner.png"
+if banner.is_file():
+    st.image(str(banner), width="stretch")
+st.caption("Desafio técnico — demonstração não oficial")
 st.title("Assistente de Dados")
 st.write("Transforme perguntas de negócio em respostas com evidências.")
 
@@ -78,6 +82,16 @@ def render_transparency(state: dict) -> None:
                     hide_index=True,
                     width="stretch",
                 )
+        if state.get("answer"):
+            st.caption(
+                "Apresentação: síntese determinística dos resultados SQL. "
+                "A explicação original do modelo foi preservada, sem validação semântica integral."
+            )
+            with st.expander("Explicação original do modelo · não verificada"):
+                st.warning("Este texto não é a síntese validada apresentada acima.")
+                st.text(state["answer"]["summary"])
+                for assumption in state["answer"]["assumptions"]:
+                    st.text(assumption)
         if state.get("usage"):
             with st.expander("Consumo registrado"):
                 st.json(state["usage"], expanded=False)
@@ -89,34 +103,44 @@ def render_result(state: dict) -> None:
         st.caption("Responda no campo abaixo para continuar esta investigação.")
     elif state.get("answer"):
         answer = state["answer"]
-        st.write(answer["summary"])
-        if answer["assumptions"]:
-            with st.expander("Interpretação e filtros"):
-                for assumption in answer["assumptions"]:
-                    st.write(assumption)
+        presentation = prepare_presentation(answer, state["results"])
+        st.subheader(presentation.title)
+        st.write(presentation.summary)
+        st.caption(
+            "Síntese determinística baseada nas consultas; "
+            "explicação original preservada na transparência."
+        )
+        if answer.get("summary"):
+            st.info(
+                "A análise retornou dados, mas a explicação textual "
+                "não foi confirmada integralmente. "
+                "Consulte os resultados verificados abaixo."
+            )
+        if presentation.kind == "ranking":
+            for index, item in enumerate(presentation.items, 1):
+                st.text(f"{index}. {item}")
         results = {r["id"]: r for r in state["results"]}
         spec = ChartSpec.model_validate(answer["chart"])
         source = spec.result_id or next(iter(answer["evidence_ids"]), None)
         for key in answer["evidence_ids"]:
             result = QueryResult.model_validate(results[key])
+            if key != source:
+                with st.expander(f"Evidência complementar · {key}"):
+                    st.dataframe(
+                        pd.DataFrame(result.rows, columns=result.columns).style.format(
+                            display_value
+                        ),
+                        column_config={name: label_for(name) for name in result.columns},
+                        hide_index=True,
+                        width="stretch",
+                    )
+                continue
             if result.status == "empty":
                 st.info("Nenhum registro encontrado para os filtros consultados.")
                 continue
-            if len(result.columns) == 1 and len(result.rows) == 1:
-                value = result.rows[0][0]
-                if (
-                    isinstance(value, (int, float))
-                    and not isinstance(value, bool)
-                    and isfinite(value)
-                ):
-                    formatted = (
-                        f"{value:,.0f}"
-                        if float(value).is_integer()
-                        else f"{value:,.4f}".rstrip("0").rstrip(".")
-                    )
-                    formatted = formatted.translate(str.maketrans({",": ".", ".": ","}))
-                    st.metric(result.columns[0].replace("_", " ").capitalize(), formatted)
-                    continue
+            if presentation.kind == "metric" and key == presentation.result_id:
+                st.metric(presentation.title, presentation.value)
+                continue
             if key == source:
                 chart = build_chart(result, spec)
                 if chart is not None:
@@ -126,7 +150,8 @@ def render_result(state: dict) -> None:
                         "Os dados não são compatíveis com o gráfico solicitado. Confira a tabela."
                     )
             st.dataframe(
-                pd.DataFrame(result.rows, columns=result.columns),
+                pd.DataFrame(result.rows, columns=result.columns).style.format(display_value),
+                column_config={name: label_for(name) for name in result.columns},
                 hide_index=True,
                 width="stretch",
             )

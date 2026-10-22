@@ -49,5 +49,6 @@ class AgentState(TypedDict, total=False):
     error: dict[str, Any] | None
     status: str
     answer: dict[str, Any] | None
+    presentation: dict[str, Any]
     clarification: str | None
     usage: dict[str, Any]

@@ -156,3 +156,38 @@ def test_scalar_result_renders_metric(settings, monkeypatch):
     assert app.metric[0].label == "Clientes"
     assert app.metric[0].value == "3"
     assert not app.get("plotly_chart")
+
+
+def test_ranking_and_unverified_narrative_in_transparency(settings, monkeypatch):
+    agent = DataAgent(
+        settings,
+        ScriptedModel(
+            (
+                "execute_query",
+                {
+                    "sql": "SELECT region,COUNT(*) n FROM people "
+                    "GROUP BY region ORDER BY n DESC LIMIT 5"
+                },
+            ),
+            finish(summary="Não existem clientes."),
+        ),
+    )
+    app = start_app(monkeypatch, agent)
+    app.chat_input[0].set_value("Ranking de clientes").run()
+    assert not app.exception
+    assert any(item.value == "1. Sul — 2" for item in app.text)
+    assert any("não foi confirmada" in item.value for item in app.info)
+    original = next(item for item in app.expander if "original do modelo" in item.label)
+    assert any(item.value == "Não existem clientes." for item in original.text)
+    assert any("demonstração não oficial" in item.value for item in app.caption)
+
+
+def test_optional_original_banner(monkeypatch):
+    import pytest
+
+    if not Path("assets/franq-banner.png").exists():
+        pytest.skip("Marca privada opcional ausente")
+    monkeypatch.setenv("ENABLE_PAID_API", "false")
+    app = AppTest.from_file(Path("app.py").resolve(), default_timeout=15).run()
+    assert not app.exception
+    assert app.get("image")

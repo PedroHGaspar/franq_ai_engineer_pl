@@ -17,6 +17,7 @@ from src.config import Settings
 from src.database import Database, DatabaseError, validate_sql
 from src.models import AgentState, FinalAnswer
 from src.observability import AuditLog, BudgetLedger
+from src.presentation import prepare_presentation
 from src.tools import build_tools
 
 SYSTEM_PROMPT = """Você é um analista de dados. Responda em português brasileiro.
@@ -447,9 +448,18 @@ class DataAgent:
                 )
             return {
                 "answer": answer.model_dump(),
+                "presentation": prepare_presentation(
+                    answer.model_dump(), state["results"]
+                ).model_dump(),
                 "status": "completed",
                 "messages": self.feedback(state, {"status": "completed"}),
-                "events": self.event(state, "finish", tool="finish", status="completed"),
+                "events": self.event(
+                    state,
+                    "finish",
+                    tool="finish",
+                    status="completed",
+                    presentation_source="deterministic",
+                ),
             }
         except (ValueError, KeyError) as exc:
             error = {"code": "inconsistent", "message": str(exc)[:200], "recoverable": True}

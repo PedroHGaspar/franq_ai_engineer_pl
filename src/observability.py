@@ -22,6 +22,7 @@ class AuditLog:
                 "status",
                 "usage",
                 "http_status",
+                "presentation_source",
             )
             if key in event
         }

@@ -123,6 +123,8 @@ A interface foi inspecionada em Chromium desktop/mobile com simulações e respo
 A bateria complementar comprovou seleção real de barras e linhas, com SQL e pontos conferidos.
 O texto da tendência apresentou uma afirmação não sustentada sobre canais ausentes em julho/2025;
 essa resposta textual não foi aprovada, embora consulta e gráfico estejam corretos.
+Agora a apresentação usa sínteses determinísticas dos resultados, preservando o texto original
+como não verificado na transparência. O banner local é opcional; veja `assets/README.md`.
 As checagens numéricas não detectam toda
 conclusão semântica incorreta; comparar resposta, SQL e referência continua necessário.
 As relações inferidas por nome/tipo são hipóteses. Checkpoints desaparecem ao encerrar

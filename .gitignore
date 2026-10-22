@@ -19,6 +19,7 @@ htmlcov/
 logs/
 .local/
 /attached file
+/assets/franq-banner.png
 tmp/
 *.tmp
 ai_engineer_pl.pdf

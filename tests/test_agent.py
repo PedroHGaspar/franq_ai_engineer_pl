@@ -220,3 +220,19 @@ def test_chart_cannot_reference_uncited_query(settings):
     assert state["status"] == "completed"
     assert state["corrections"] == 1
     assert state["answer"]["chart"]["result_id"] == "q1"
+
+
+def test_safe_presentation_preserves_original_model_text(settings):
+    text = "Não existem registros de vendas."
+    state = DataAgent(
+        settings,
+        ScriptedModel(
+            ("execute_query", {"sql": "SELECT COUNT(*) n FROM sales"}),
+            finish(summary=text),
+        ),
+    ).run("Total de vendas")
+    assert state["status"] == "completed"
+    assert state["answer"]["summary"] == text
+    assert state["presentation"]["value"] == "3"
+    assert text not in state["presentation"]["summary"]
+    assert state["events"][-1]["presentation_source"] == "deterministic"
