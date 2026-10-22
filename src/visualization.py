@@ -1,3 +1,4 @@
+import re
 from hashlib import sha256
 from html import escape
 from textwrap import wrap
@@ -5,8 +6,48 @@ from textwrap import wrap
 import pandas as pd
 import plotly.express as px
 
+from src.intent import PERIOD, normalize
 from src.models import ChartSpec, QueryResult
 from src.presentation import display_value, label_for
+
+REQUESTED = re.compile(r"\b(tabela)\b|\b(?:graficos? de|em) (barras?|colunas?|linhas?)\b")
+
+
+def default_chart(question: str, result: QueryResult) -> ChartSpec:
+    """Chooses the chart from the data shape, so the same result always gets the same chart.
+
+    An explicit request in the question (table, bars or lines) takes precedence.
+    """
+    match = REQUESTED.search(normalize(question))
+    requested = (match.group(1) or match.group(2).rstrip("s")) if match else None
+    if requested == "tabela":
+        return ChartSpec(kind="table")
+    rows, columns = result.rows, result.columns
+    numbers = [
+        i
+        for i in range(len(columns))
+        if rows and all(isinstance(r[i], (int, float)) and not isinstance(r[i], bool) for r in rows)
+    ]
+    period = next(
+        (
+            i
+            for i in range(len(columns))
+            if rows and all(isinstance(r[i], str) and PERIOD.match(r[i]) for r in rows)
+        ),
+        None,
+    )
+    labels = [i for i in range(len(columns)) if i != period and i not in numbers]
+    explicit = {"barra": "bar", "coluna": "bar", "linha": "line"}.get(requested)
+    if result.status != "ok" or len(rows) < 2 or not numbers or len(labels) > 1:
+        return ChartSpec(kind=explicit or "table")
+    y, label = columns[numbers[0]], (columns[labels[0]] if labels else None)
+    if period is not None and explicit != "bar":
+        return ChartSpec(kind="line", x=columns[period], y=y, color=label)
+    if period is not None:
+        return ChartSpec(kind="bar", x=columns[period], y=y, color=label)
+    if label and len(rows) <= 20 and explicit != "line":
+        return ChartSpec(kind="bar", x=label, y=y, color=label)
+    return ChartSpec(kind=explicit or "table")
 
 
 def select_chart(result: QueryResult, requested: ChartSpec) -> ChartSpec:

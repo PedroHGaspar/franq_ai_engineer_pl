@@ -116,7 +116,7 @@ def test_empty_and_incompatible_chart(settings, monkeypatch):
     app.chat_input[0].set_value("Sem dados").run()
     assert any(item.value == "Nenhum registro encontrado" for item in app.subheader)
     assert any("ausência de registros, não falha" in item.value for item in app.markdown)
-    app.chat_input[0].set_value("Gráfico incompatível").run()
+    app.chat_input[0].set_value("Mostre as regiões em gráfico de barras").run()
     assert not app.exception
     assert any("não são compatíveis" in item.value for item in app.info)
     assert not app.get("plotly_chart")

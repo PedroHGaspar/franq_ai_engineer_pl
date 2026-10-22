@@ -10,9 +10,9 @@ from PIL import Image
 from src.agent import DataAgent
 from src.config import Settings
 from src.database import DatabaseError
-from src.models import ChartSpec, QueryResult
+from src.models import QueryResult
 from src.presentation import display_value, label_for, prepare_presentation
-from src.visualization import build_chart
+from src.visualization import build_chart, default_chart
 
 st.set_page_config(page_title="Franq · Assistente de Dados", page_icon="📊", layout="centered")
 st.html(
@@ -129,7 +129,6 @@ def render_result(state: dict, entry_id: str) -> None:
                 for assumption in answer["assumptions"]:
                     st.write(assumption)
         results = {r["id"]: r for r in state["results"]}
-        spec = ChartSpec.model_validate(answer["chart"])
         source = presentation.result_id
         for key in answer["evidence_ids"]:
             result = QueryResult.model_validate(results[key])
@@ -149,14 +148,13 @@ def render_result(state: dict, entry_id: str) -> None:
             if presentation.kind == "metric":
                 st.metric(presentation.title, presentation.value)
                 continue
-            if spec.result_id in {None, key}:
-                chart = build_chart(result, spec)
-                if chart is not None:
-                    st.plotly_chart(chart, width="stretch", key=f"chart-{entry_id}-{key}")
-                elif spec.kind in {"bar", "line"}:
-                    st.info(
-                        "Os dados não são compatíveis com o gráfico solicitado. Confira a tabela."
-                    )
+            # Deterministic choice from the data shape: the same result always gets the same chart.
+            spec = default_chart(state["question"], result)
+            chart = build_chart(result, spec)
+            if chart is not None:
+                st.plotly_chart(chart, width="stretch", key=f"chart-{entry_id}-{key}")
+            elif spec.kind in {"bar", "line"}:
+                st.info("Os dados não são compatíveis com o gráfico solicitado. Confira a tabela.")
             st.dataframe(
                 pd.DataFrame(result.rows, columns=result.columns).style.format(display_value),
                 column_config={name: label_for(name) for name in result.columns},

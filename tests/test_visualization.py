@@ -1,7 +1,7 @@
 import pytest
 
 from src.models import ChartSpec, QueryResult
-from src.visualization import build_chart, select_chart
+from src.visualization import build_chart, default_chart, select_chart
 
 
 def result(columns, rows, status="ok"):
@@ -93,3 +93,33 @@ def test_category_colors_stable_across_subsets():
 def test_many_categories_use_readable_table():
     data = result(["categoria", "total"], [[str(i), i] for i in range(25)])
     assert build_chart(data, ChartSpec(kind="bar", x="categoria", y="total")) is None
+
+
+@pytest.mark.parametrize(
+    "question,rows,columns,expected",
+    [
+        # The model may ask for any chart; the data shape decides, so reruns always match.
+        ("Top 5 estados", [["SP", 6], ["MG", 3]], ["estado", "n"], ("bar", "estado", "n")),
+        (
+            "Tendência por canal",
+            [["2025-01", "Chat", 2], ["2025-02", "Chat", 3]],
+            ["mes", "canal", "n"],
+            ("line", "mes", "n"),
+        ),
+        ("Total", [[3], [4]], ["n"], ("table", None, None)),
+        ("Estados em tabela", [["SP", 6], ["MG", 3]], ["estado", "n"], ("table", None, None)),
+        (
+            "Tendência em gráfico de barras",
+            [["2025-01", 2], ["2025-02", 3]],
+            ["mes", "n"],
+            ("bar", "mes", "n"),
+        ),
+        ("Quais colunas existem?", [["a", 1], ["b", 2]], ["coluna", "n"], ("bar", "coluna", "n")),
+    ],
+)
+def test_default_chart_depends_only_on_question_and_data(question, rows, columns, expected):
+    result = QueryResult(
+        id="q1", sql="SELECT 1", columns=columns, rows=rows, status="ok", duration_ms=1
+    )
+    spec = default_chart(question, result)
+    assert (spec.kind, spec.x, spec.y) == expected
