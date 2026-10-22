@@ -144,7 +144,7 @@ class DataAgent:
         self.ledger = None
         if self.paid:
             if not settings.enable_paid_api:
-                raise ValueError("API paga desabilitada. Aguarde autorização para a Etapa E.")
+                raise ValueError("API desabilitada. Defina ENABLE_PAID_API=true no .env.")
             if not settings.openai_api_key.get_secret_value():
                 raise ValueError("Configure OPENAI_API_KEY localmente.")
             self.ledger = BudgetLedger(settings.local_dir, settings.api_budget_usd)

@@ -210,7 +210,7 @@ with st.sidebar:
 
 if not settings.enable_paid_api:
     st.info(
-        "Chamadas à OpenAI desabilitadas. A habilitação depende de autorização para testes reais."
+        "Chamadas à OpenAI desabilitadas. Defina OPENAI_API_KEY e ENABLE_PAID_API=true no .env."
     )
 
 question = st.chat_input(

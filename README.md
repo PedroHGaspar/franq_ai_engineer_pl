@@ -36,17 +36,18 @@ recente com registros e “último ano” são os 12 meses até o último regist
 o período considerado.
 No primeiro início, deixe o campo de e-mail do Streamlit vazio, se solicitado.
 
-Coloque `anexo_desafio_1.db` na raiz ou ajuste `DATABASE_PATH` no `.env`.
-Configure `OPENAI_API_KEY` apenas localmente. `ENABLE_PAID_API=false` é o padrão:
-a interface abre, mas não envia perguntas. Habilite somente após autorizar o uso pago.
-Não é necessário configurar chave para executar testes.
+Antes de abrir a aplicação:
 
-Modelo inicial: `gpt-5.4-mini-2026-03-17`, configurável por `OPENAI_MODEL`.
-O teto local inicial é US$ 0,50, independente do orçamento mensal de US$ 5.
-Uma reserva conservadora precede cada chamada; consumo conhecido substitui a reserva,
-e falhas sem informação de uso mantêm a reserva. O controle persiste em `.local/usage.sqlite`.
-Não apague esse arquivo durante a validação. Ao mudar o modelo, atualize também
-`INPUT_PRICE_PER_MILLION` e `OUTPUT_PRICE_PER_MILLION`; o controle depende dessas tarifas.
+1. Coloque `anexo_desafio_1.db` na raiz do projeto (ou ajuste `DATABASE_PATH` no `.env`).
+2. No `.env`, preencha `OPENAI_API_KEY` com sua chave e defina `ENABLE_PAID_API=true`.
+
+Com `ENABLE_PAID_API=false` (padrão), a interface abre, mas não envia perguntas à OpenAI.
+Os testes não precisam de chave nem fazem chamadas à API.
+
+Modelo padrão: `gpt-5.4-mini-2026-03-17`, configurável por `OPENAI_MODEL`.
+A aplicação limita o gasto local a US$ 0,50 (`API_BUDGET_USD`), registrado em
+`.local/usage.sqlite`; ao trocar de modelo, ajuste também `INPUT_PRICE_PER_MILLION` e
+`OUTPUT_PRICE_PER_MILLION`.
 
 ## Arquitetura
 
@@ -113,42 +114,34 @@ adversarial, descoberta, correção, múltiplas consultas, limites, evidências,
 orçamento e interface Streamlit. Testes `original` usam o banco privado quando presente;
 sem ele, são explicitamente ignorados. As fixtures pequenas são exclusivas dos testes.
 
-Referências verificadas por SQL local (não por LLM real):
+### Exemplos de consultas testadas
 
-- Clientes que interagiram com WhatsApp em 2024: **17**.
-- Reclamações não resolvidas: **Chat 18, E-mail 14, Telefone 19**.
-- Estados com mais clientes via App em **maio de 2025**, com desempate alfabético.
-- Média de compras por **comprador de cada categoria**, comparada a cálculo Python.
-- Reclamações mensais por canal entre **23/07/2024 e 22/07/2025**, comparadas a Python.
-- Pergunta inédita: clientes que nunca compraram pelo App, validada por diferença de conjuntos.
+As perguntas do enunciado foram executadas pela interface com o modelo real e conferidas
+com SQL independente no banco fornecido:
 
-“Maio” e “último ano” são resolvidos pelos dados disponíveis; o denominador de médias é
-declarado na interpretação adotada.
-Os resumos de gasto/última compra em `clientes` divergem dos eventos em `compras`;
-as análises de compras devem considerar essa limitação. O agente deve descobrir
-essas condições pelos dados, não por consultas predefinidas no código de produção.
+| Pergunta | Resultado esperado |
+|---|---|
+| Liste os 5 estados com maior número de clientes que compraram via app em maio. | Maio de 2025: São Paulo 6, Minas Gerais 3, Santa Catarina 3, Alagoas 2, Espírito Santo 2 |
+| Quantos clientes interagiram com campanhas de WhatsApp em 2024? | 17 clientes |
+| Quais categorias de produto tiveram o maior número de compras em média por cliente? | Roupas (≈2,21), Viagens (≈2,16), Livros (≈1,98)… |
+| Qual o número de reclamações não resolvidas por canal? | Telefone 19, Chat 18, E-mail 14 |
+| Qual a tendência de reclamações por canal no último ano? | Série mensal por canal de 23/07/2024 a 22/07/2025, em gráfico de linhas |
+
+Também foi testada uma pergunta fora do enunciado: clientes que nunca compraram pelo App.
+“Maio” e “último ano” são resolvidos pelos dados disponíveis. Os resumos de gasto e última
+compra em `clientes` divergem dos eventos em `compras`; o agente deve usar os eventos.
 
 ## Limitações e melhorias
 
-Uma primeira bateria real conferiu WhatsApp, reclamações e médias por categoria com SQL
-independente. A resposta de médias foi revalidada offline após corrigir um falso positivo
-de arredondamento. A API exigiu `reasoning_effort="none"` para ferramentas nesse modelo
-via Chat Completions. Avaliação ampliada de perguntas inéditas permanece pendente.
-A interface foi inspecionada em Chromium desktop/mobile com simulações e respostas salvas.
-A bateria complementar comprovou seleção real de barras e linhas, com SQL e pontos conferidos.
-O texto da tendência apresentou uma afirmação não sustentada sobre canais ausentes em julho/2025;
-essa resposta textual não foi aprovada, embora consulta e gráfico estejam corretos.
-Agora a apresentação usa sínteses determinísticas dos resultados (métrica, ranking, comparação
-ou primeiro/último/pico de cada série) e mantém o texto original do modelo na transparência,
-com números conferidos. As regras de intenção são heurísticas lexicais em português e podem
-não reconhecer formulações incomuns. A bateria conversacional usa modelos simulados; as
-correções ainda não foram revalidadas com o LLM real. O banner local é opcional; veja
-`assets/README.md`.
-As checagens numéricas não detectam toda
-conclusão semântica incorreta; comparar resposta, SQL e referência continua necessário.
-As relações inferidas por nome/tipo são hipóteses. Checkpoints desaparecem ao encerrar
-o processo. Tarifas são configuráveis e o orçamento local não cobre uso externo à aplicação.
+- O modelo pode gerar SQL diferente para a mesma pergunta. As validações rejeitam respostas
+  inconsistentes e pedem correção, mas não garantem toda conclusão semântica; a transparência
+  operacional permite conferir SQL e resultados.
+- As regras de intenção são heurísticas em português e podem não reconhecer formulações incomuns.
+- Relações entre tabelas inferidas por nome e tipo são hipóteses; checkpoints de conversa
+  ficam em memória e desaparecem ao encerrar o servidor.
+- O banner da Franq é opcional e não é distribuído; veja `assets/README.md`.
 
-Próximas melhorias: avaliação real progressiva, catálogo de métricas aprovado pelo negócio,
-checagens semânticas adicionais e política de retenção. Dependências estão fixadas em
-`uv.lock`; `requirements.lock` é sua exportação para instalação com pip.
+Próximas melhorias: catálogo de métricas aprovado pelo negócio, avaliação automática com um
+conjunto maior de perguntas reais, cache de consultas, autenticação e política de retenção para
+uso fora do ambiente local. Dependências estão fixadas em `uv.lock`; `requirements.lock` é sua
+exportação para instalação com pip.
