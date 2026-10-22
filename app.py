@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
+from PIL import Image
 
 from src.agent import DataAgent
 from src.config import Settings
@@ -12,10 +13,15 @@ from src.presentation import display_value, label_for, prepare_presentation
 from src.visualization import build_chart
 
 st.set_page_config(page_title="Franq · Assistente de Dados", page_icon="📊", layout="centered")
-st.html("<style>.block-container {padding-top: 4rem; padding-bottom: 6rem;}</style>")
+st.html(
+    "<style>.block-container {padding-top: 4rem; padding-bottom: 6rem;}"
+    "[data-testid='stStatusWidget'] {visibility: hidden;}</style>"
+)
 banner = Path(__file__).resolve().parent / "assets" / "franq-banner.png"
 if banner.is_file():
     st.image(str(banner), width="stretch")
+    # The logo area of the banner stays visible in the sidebar while the conversation scrolls.
+    st.logo(Image.open(banner).crop((1980, 30, 2360, 160)), size="large")
 st.caption("Desafio técnico — demonstração não oficial")
 st.title("Assistente de Dados")
 st.write("Transforme perguntas de negócio em respostas com evidências.")
@@ -151,7 +157,16 @@ def render_result(state: dict, entry_id: str) -> None:
                 width="stretch",
             )
     else:
-        message = (state.get("error") or {}).get("message", "Falha não identificada.")
+        error = state.get("error") or {}
+        # Service and configuration messages help the user; technical details stay in the
+        # transparency panel below.
+        if error.get("code") in {None, "llm_unavailable", "llm_configuration", "budget_or_context"}:
+            message = error.get("message", "Falha não identificada.")
+        else:
+            message = (
+                "Não foi possível chegar a uma resposta confiável. Tente reformular a pergunta "
+                "ou dividi-la em perguntas menores."
+            )
         st.error(f"A análise não foi concluída. {message}")
         if state.get("results"):
             st.caption(
@@ -197,7 +212,13 @@ processing = bool(history) and history[-1]["state"] is None
 
 with st.sidebar:
     st.subheader("Sua conversa")
-    if st.button("Limpar histórico", disabled=processing):
+    if not history:
+        st.caption("Nenhuma pergunta ainda.")
+    for number, entry in enumerate(history, 1):
+        question_text = entry["question"]
+        short = question_text if len(question_text) <= 70 else question_text[:67] + "…"
+        st.caption(f"{number}. {short}")
+    if st.button("Limpar histórico", disabled=processing or not history):
         st.session_state.pop("history", None)
         st.session_state.pop("agent", None)
         st.session_state.pop("pending_thread", None)
