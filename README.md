@@ -27,6 +27,10 @@ python -c "from pathlib import Path; p=Path('.env'); p.exists() or p.write_bytes
 python -m streamlit run app.py --server.address 127.0.0.1
 ```
 
+Abra **http://localhost:8501** no navegador do Windows, inclusive ao executar no WSL.
+Mantenha o terminal aberto; `Ctrl+C` encerra o servidor. A aplicação escuta apenas localmente.
+No primeiro início, deixe o campo de e-mail do Streamlit vazio, se solicitado.
+
 Coloque `anexo_desafio_1.db` na raiz ou ajuste `DATABASE_PATH` no `.env`.
 Configure `OPENAI_API_KEY` apenas localmente. `ENABLE_PAID_API=false` é o padrão:
 a interface abre, mas não envia perguntas. Habilite somente após autorizar o uso pago.
@@ -78,6 +82,8 @@ deterministicamente; isso não prova a semântica da análise.
 O expansor mostra ferramentas, SQL, erros, tentativas e duração, sem raciocínio privado.
 Logs JSON locais omitem prompts, SQL e linhas individuais. Histórico e consultas ficam
 na sessão; não use a interface como serviço público sem controles adicionais.
+Gráficos identificam sua consulta de origem, com eixos e séries validados; dados incompatíveis
+permanecem em tabela. Esclarecimentos são respondidos no mesmo campo de perguntas.
 
 ## Perguntas e testes
 
@@ -113,6 +119,9 @@ Uma primeira bateria real conferiu WhatsApp, reclamações e médias por categor
 independente. A resposta de médias foi revalidada offline após corrigir um falso positivo
 de arredondamento. A API exigiu `reasoning_effort="none"` para ferramentas nesse modelo
 via Chat Completions. Avaliação ampliada de perguntas inéditas permanece pendente.
+A interface foi inspecionada em Chromium desktop/mobile com modelo simulado e SQLite real,
+incluindo tabelas, barras, linhas e esclarecimentos. A escolha automática de gráficos pelo
+modelo real ainda exige uma bateria adicional autorizada; simulação não comprova essa decisão.
 As checagens numéricas não detectam toda
 conclusão semântica incorreta; comparar resposta, SQL e referência continua necessário.
 As relações inferidas por nome/tipo são hipóteses. Checkpoints desaparecem ao encerrar
