@@ -245,8 +245,10 @@ def prepare_presentation(
             ),
             items=[f"{row[0]} — {display_value(row[1])}" for row in ordered],
         )
+    count = len(result.rows)
+    found = "resultado encontrado" if count == 1 else "resultados encontrados"
     return Presentation(
         **base,
         kind=kind,
-        summary=f"{len(result.rows)} resultados encontrados para os filtros consultados.",
+        summary=f"{count} {found} para os filtros consultados.",
     )

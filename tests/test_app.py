@@ -62,6 +62,8 @@ def test_clarification_resume_history_and_clear(settings, monkeypatch):
     assert len(app.session_state["history"]) == 2
     app.run()
     assert len(app.chat_message) == 4
+    links = [item.proto.body for item in app.sidebar.get("html")]
+    assert any('href="#pergunta-2"' in link for link in links)
     app.sidebar.button[0].click().run()
     assert not app.session_state["history"]
 

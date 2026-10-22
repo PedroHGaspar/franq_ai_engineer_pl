@@ -1,4 +1,5 @@
 from base64 import b64encode
+from html import escape
 from pathlib import Path
 from uuid import uuid4
 
@@ -223,7 +224,11 @@ with st.sidebar:
     for number, entry in enumerate(history, 1):
         question_text = entry["question"]
         short = question_text if len(question_text) <= 70 else question_text[:67] + "…"
-        st.caption(f"{number}. {short}")
+        # Links to the anchor placed on each question in the conversation.
+        st.html(
+            f'<a href="#pergunta-{number}" target="_self" style="color: inherit; '
+            f'text-decoration: none; font-size: 0.875rem;">{number}. {escape(short)}</a>'
+        )
     if st.button("Limpar histórico", disabled=processing or not history):
         st.session_state.pop("history", None)
         st.session_state.pop("agent", None)
@@ -277,7 +282,11 @@ if not history:
 
 for index, entry in enumerate(history):
     with st.chat_message("user"):
-        st.write(entry["question"])
+        st.markdown(
+            f'<span id="pergunta-{index + 1}" style="scroll-margin-top: 5rem;"></span>'
+            + escape(entry["question"]),
+            unsafe_allow_html=True,
+        )
     with st.chat_message("assistant"):
         if entry["state"] is None:
             thread = entry["thread"] or str(uuid4())
