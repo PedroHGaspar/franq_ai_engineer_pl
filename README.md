@@ -119,9 +119,10 @@ Uma primeira bateria real conferiu WhatsApp, reclamações e médias por categor
 independente. A resposta de médias foi revalidada offline após corrigir um falso positivo
 de arredondamento. A API exigiu `reasoning_effort="none"` para ferramentas nesse modelo
 via Chat Completions. Avaliação ampliada de perguntas inéditas permanece pendente.
-A interface foi inspecionada em Chromium desktop/mobile com modelo simulado e SQLite real,
-incluindo tabelas, barras, linhas e esclarecimentos. A escolha automática de gráficos pelo
-modelo real ainda exige uma bateria adicional autorizada; simulação não comprova essa decisão.
+A interface foi inspecionada em Chromium desktop/mobile com simulações e respostas salvas.
+A bateria complementar comprovou seleção real de barras e linhas, com SQL e pontos conferidos.
+O texto da tendência apresentou uma afirmação não sustentada sobre canais ausentes em julho/2025;
+essa resposta textual não foi aprovada, embora consulta e gráfico estejam corretos.
 As checagens numéricas não detectam toda
 conclusão semântica incorreta; comparar resposta, SQL e referência continua necessário.
 As relações inferidas por nome/tipo são hipóteses. Checkpoints desaparecem ao encerrar
