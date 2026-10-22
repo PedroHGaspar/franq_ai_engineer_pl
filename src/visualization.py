@@ -130,7 +130,9 @@ def build_chart(result: QueryResult, spec: ChartSpec):
         frame = frame.sort_values(selected.x)
         figure = px.line(frame, **options, markers=True)
     else:
-        figure = px.bar(frame, **options, barmode="group")
+        # One trace per category would be offset as a group; relative keeps each bar centered.
+        barmode = "relative" if selected.color == selected.x else "group"
+        figure = px.bar(frame, **options, barmode=barmode)
     figure.update_layout(
         title=dict(
             text="<br>".join(

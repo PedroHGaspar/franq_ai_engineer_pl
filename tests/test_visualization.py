@@ -123,3 +123,11 @@ def test_default_chart_depends_only_on_question_and_data(question, rows, columns
     )
     spec = default_chart(question, result)
     assert (spec.kind, spec.x, spec.y) == expected
+
+
+def test_bars_colored_by_category_stay_centered():
+    figure = build_chart(
+        result(["canal", "n"], [["Chat", 18], ["E-mail", 14]]),
+        ChartSpec(kind="bar", x="canal", y="n", color="canal"),
+    )
+    assert figure.layout.barmode == "relative"

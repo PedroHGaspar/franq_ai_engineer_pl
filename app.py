@@ -11,7 +11,7 @@ from src.agent import DataAgent
 from src.config import Settings
 from src.database import DatabaseError
 from src.models import QueryResult
-from src.presentation import display_value, label_for, prepare_presentation
+from src.presentation import display_value, label_for, numeric, prepare_presentation
 from src.visualization import build_chart, default_chart
 
 st.set_page_config(page_title="Franq · Assistente de Dados", page_icon="📊", layout="centered")
@@ -133,6 +133,11 @@ def render_result(state: dict, entry_id: str) -> None:
         for key in answer["evidence_ids"]:
             result = QueryResult.model_validate(results[key])
             if key != source:
+                value = result.rows[0][0] if len(result.columns) == 1 and result.rows else None
+                if len(result.rows) == 1 and numeric(value):
+                    # A single value usually answers another part of the question: show it.
+                    st.metric(label_for(result.columns[0]), display_value(value))
+                    continue
                 with st.expander(f"Evidência complementar · {key}"):
                     st.dataframe(
                         pd.DataFrame(result.rows, columns=result.columns).style.format(

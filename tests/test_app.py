@@ -222,3 +222,19 @@ def test_unexpected_error_names_its_type_without_details(settings, monkeypatch):
     app.chat_input[0].set_value("Total de vendas").run()
     assert "TypeError" in app.error[0].value and "reinicie o servidor" in app.error[0].value
     assert "secret-detail" not in str(app.session_state["history"])
+
+
+def test_compound_question_shows_every_single_value_answer(settings, monkeypatch):
+    agent = DataAgent(
+        settings,
+        ScriptedModel(
+            ("execute_query", {"sql": "SELECT channel, COUNT(*) n FROM sales GROUP BY channel"}),
+            ("execute_query", {"sql": "SELECT COUNT(*) AS pessoas FROM people"}),
+            finish(["q1", "q2"], primary_result_id="q1"),
+        ),
+    )
+    app = start_app(monkeypatch, agent)
+    app.chat_input[0].set_value("Quantas vendas por canal e quantas pessoas temos?").run()
+    assert not app.exception
+    assert [(m.label, m.value) for m in app.metric] == [("Pessoas", "3")]
+    assert not any("Evidência complementar" in item.label for item in app.expander)
