@@ -16,6 +16,7 @@ def test_budget_blocks_model_before_request(settings, monkeypatch):
     state = DataAgent(settings).run("Investigue")
     assert not model.messages
     assert state["error"]["code"] == "budget_or_context"
+    assert "API_BUDGET_USD" in state["error"]["message"]
 
 
 def test_context_limit_blocks_model(settings, monkeypatch):
@@ -30,3 +31,4 @@ def test_context_limit_blocks_model(settings, monkeypatch):
     state = DataAgent(settings).run("Investigue")
     assert not model.messages
     assert state["error"]["code"] == "budget_or_context"
+    assert "contexto" in state["error"]["message"]

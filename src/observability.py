@@ -30,6 +30,10 @@ class AuditLog:
             stream.write(json.dumps({"run_id": run_id, "timestamp": time.time(), **allowed}) + "\n")
 
 
+class BudgetExceeded(ValueError):
+    pass
+
+
 class BudgetLedger:
     """Reserves worst-case cost atomically across local sessions before each API request."""
 
@@ -50,7 +54,7 @@ class BudgetLedger:
                 "SELECT COALESCE(SUM(COALESCE(actual, reserved)),0) FROM usage"
             ).fetchone()[0]
             if total + amount > self.budget:
-                raise ValueError("Orçamento local insuficiente para uma nova chamada.")
+                raise BudgetExceeded("Orçamento local insuficiente para uma nova chamada.")
             cursor = connection.execute(
                 "INSERT INTO usage(run_id,reserved) VALUES (?,?)", (run_id, amount)
             )

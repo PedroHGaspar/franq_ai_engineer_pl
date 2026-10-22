@@ -17,7 +17,7 @@ from src.config import Settings
 from src.database import Database, DatabaseError, validate_sql
 from src.intent import resolve_period, select_primary
 from src.models import AgentState, FinalAnswer
-from src.observability import AuditLog, BudgetLedger
+from src.observability import AuditLog, BudgetExceeded, BudgetLedger
 from src.presentation import prepare_presentation
 from src.tools import build_tools
 
@@ -387,10 +387,15 @@ class DataAgent:
             if http_status in {400, 401, 403, 404}:
                 code = "llm_configuration"
             message = (
-                "Limite de orçamento/contexto ou configuração inválida. Confira a configuração."
+                "Limite de contexto atingido; refine ou divida a pergunta."
                 if isinstance(exc, ValueError)
                 else "Modelo indisponível; tente novamente mais tarde."
             )
+            if isinstance(exc, BudgetExceeded):
+                message = (
+                    "Teto local de gasto atingido. Aumente API_BUDGET_USD no .env "
+                    "e reinicie a aplicação para continuar."
+                )
             if code == "llm_configuration":
                 message = "A API rejeitou a configuração ou o acesso. Corrija antes de repetir."
             return {
