@@ -140,3 +140,19 @@ def test_busy_session_disables_new_submission(settings, monkeypatch):
     app.session_state["busy"] = True
     app.run()
     assert app.chat_input[0].disabled
+
+
+def test_scalar_result_renders_metric(settings, monkeypatch):
+    agent = DataAgent(
+        settings,
+        ScriptedModel(
+            ("execute_query", {"sql": "SELECT COUNT(*) AS clientes FROM people"}),
+            finish(),
+        ),
+    )
+    app = start_app(monkeypatch, agent)
+    app.chat_input[0].set_value("Total de clientes").run()
+    assert not app.exception
+    assert app.metric[0].label == "Clientes"
+    assert app.metric[0].value == "3"
+    assert not app.get("plotly_chart")

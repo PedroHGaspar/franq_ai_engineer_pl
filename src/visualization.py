@@ -1,3 +1,6 @@
+from html import escape
+from textwrap import wrap
+
 import pandas as pd
 import plotly.express as px
 
@@ -35,20 +38,51 @@ def build_chart(result: QueryResult, spec: ChartSpec):
     if selected.kind == "table":
         return None
     frame = pd.DataFrame(result.rows, columns=result.columns)
+    palette = ["#646FE6", "#177C80", "#C46B29", "#965BB5", "#4376A8"]
+    colors = (
+        {
+            value: palette[i % len(palette)]
+            for i, value in enumerate(sorted(frame[selected.color].unique(), key=str))
+        }
+        if selected.color
+        else None
+    )
+    options = dict(
+        x=selected.x,
+        y=selected.y,
+        color=selected.color,
+        color_discrete_map=colors,
+        color_discrete_sequence=palette,
+    )
     if selected.kind == "line":
         frame[selected.x] = pd.to_datetime(frame[selected.x], format="mixed")
         frame = frame.sort_values(selected.x)
-        figure = px.line(frame, x=selected.x, y=selected.y, color=selected.color, markers=True)
+        figure = px.line(frame, **options, markers=True)
     else:
-        figure = px.bar(frame, x=selected.x, y=selected.y, color=selected.color, barmode="group")
+        figure = px.bar(frame, **options, barmode="group")
     labels = {column: column.replace("_", " ").capitalize() for column in result.columns}
     figure.update_layout(
-        title=selected.title or f"{labels[selected.y]} por {labels[selected.x].lower()}",
+        title=dict(
+            text="<br>".join(
+                escape(line)
+                for line in wrap(
+                    selected.title or f"{labels[selected.y]} por {labels[selected.x].lower()}", 38
+                )
+            ),
+            font=dict(size=16),
+            x=0,
+            xanchor="left",
+        ),
         xaxis_title=labels[selected.x],
         yaxis_title=labels[selected.y],
         legend_title_text=labels.get(selected.color, ""),
-        margin=dict(l=16, r=16, t=60, b=24),
+        margin=dict(l=16, r=16, t=80, b=24),
         legend=dict(orientation="h", y=-0.25),
         height=420,
+        separators=",.",
     )
+    if (frame[selected.y] % 1 == 0).all():
+        figure.update_yaxes(tickformat=",d", minexponent=6)
+    if selected.kind == "line":
+        figure.update_xaxes(tickformat="%m/%Y")
     return figure

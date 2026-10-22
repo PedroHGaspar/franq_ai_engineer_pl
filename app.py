@@ -1,3 +1,4 @@
+from math import isfinite
 from uuid import uuid4
 
 import pandas as pd
@@ -9,9 +10,11 @@ from src.database import DatabaseError
 from src.models import ChartSpec, QueryResult
 from src.visualization import build_chart
 
-st.set_page_config(page_title="Franq · Assistente de Dados", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Franq · Assistente de Dados", page_icon="📊", layout="centered")
+st.html("<style>.block-container {padding-top: 4rem; padding-bottom: 6rem;}</style>")
+st.caption("FRANQ  /  INTELIGÊNCIA DE DADOS")
 st.title("Assistente de Dados")
-st.caption("Investigue perguntas de negócio com consultas rastreáveis ao SQLite.")
+st.write("Transforme perguntas de negócio em respostas com evidências.")
 
 
 def render_transparency(state: dict) -> None:
@@ -21,12 +24,20 @@ def render_transparency(state: dict) -> None:
             f"Chamadas ao modelo: {state['model_calls']} · "
             f"Tentativas SQL: {state['queries']} · Correções: {state['corrections']}"
         )
+        duration = sum(event.get("duration_ms", 0) for event in state["events"])
+        tools = sorted({event["tool"] for event in state["events"] if event.get("tool")})
+        st.caption(
+            f"Consultas concluídas: {len(state['results'])} · "
+            f"Tempo das operações: {duration / 1000:.2f} s"
+        )
+        st.caption("Ferramentas: " + (", ".join(tools) or "Nenhuma"))
         labels = {
             "metadata": "Descoberta do banco",
             "validate": "Validação SQL",
             "execute": "Execução SQL",
             "evaluate": "Avaliação",
             "decide": "Seleção de ferramenta",
+            "model": "Modelo",
             "finish": "Conclusão",
             "clarify": "Esclarecimento",
         }
@@ -54,14 +65,14 @@ def render_transparency(state: dict) -> None:
             sql = event.get("sql")
             if sql and sql not in executed and sql not in shown:
                 st.caption("SQL gerado · antes da normalização ou sem resultado concluído")
-                st.code(sql, language="sql")
+                st.code(sql, language="sql", wrap_lines=True)
                 shown.add(sql)
         for result in state["results"]:
             with st.expander(
                 f"{result['id']} · SQL executado · {result['status']} · "
                 f"{result['duration_ms']:.1f} ms"
             ):
-                st.code(result["sql"], language="sql")
+                st.code(result["sql"], language="sql", wrap_lines=True)
                 st.dataframe(
                     pd.DataFrame(result["rows"], columns=result["columns"]),
                     hide_index=True,
@@ -79,8 +90,10 @@ def render_result(state: dict) -> None:
     elif state.get("answer"):
         answer = state["answer"]
         st.write(answer["summary"])
-        for assumption in answer["assumptions"]:
-            st.caption(assumption)
+        if answer["assumptions"]:
+            with st.expander("Interpretação e filtros"):
+                for assumption in answer["assumptions"]:
+                    st.write(assumption)
         results = {r["id"]: r for r in state["results"]}
         spec = ChartSpec.model_validate(answer["chart"])
         source = spec.result_id or next(iter(answer["evidence_ids"]), None)
@@ -89,6 +102,21 @@ def render_result(state: dict) -> None:
             if result.status == "empty":
                 st.info("Nenhum registro encontrado para os filtros consultados.")
                 continue
+            if len(result.columns) == 1 and len(result.rows) == 1:
+                value = result.rows[0][0]
+                if (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and isfinite(value)
+                ):
+                    formatted = (
+                        f"{value:,.0f}"
+                        if float(value).is_integer()
+                        else f"{value:,.4f}".rstrip("0").rstrip(".")
+                    )
+                    formatted = formatted.translate(str.maketrans({",": ".", ".": ","}))
+                    st.metric(result.columns[0].replace("_", " ").capitalize(), formatted)
+                    continue
             if key == source:
                 chart = build_chart(result, spec)
                 if chart is not None:
@@ -116,15 +144,17 @@ except Exception:
     st.stop()
 
 with st.sidebar:
-    st.subheader("Sessão")
-    st.caption(f"Modelo: {settings.openai_model}")
-    st.caption(f"Teto local configurado: US$ {settings.api_budget_usd:.2f}")
+    st.subheader("Sua conversa")
     if st.button("Limpar histórico"):
         st.session_state.pop("history", None)
         st.session_state.pop("agent", None)
         st.session_state.pop("pending_thread", None)
         st.rerun()
     st.caption("Especifique anos e períodos. Nomes e e-mails não são necessários às análises.")
+    with st.expander("Sobre a sessão"):
+        st.caption(f"Modelo: {settings.openai_model}")
+        st.caption(f"Teto local configurado: US$ {settings.api_budget_usd:.2f}")
+        st.caption("O histórico fica disponível apenas nesta sessão.")
 
 if not settings.enable_paid_api:
     st.info(
@@ -133,9 +163,15 @@ if not settings.enable_paid_api:
 
 history = st.session_state.setdefault("history", [])
 if not history:
-    st.subheader("O que você gostaria de investigar?")
-    st.write("Pergunte sobre clientes, compras, campanhas ou atendimento.")
-    st.caption("Inclua o período desejado. Você também pode pedir uma tabela ou um gráfico.")
+    st.subheader("Comece com uma pergunta")
+    st.caption("Clientes, compras, campanhas e atendimento. Inclua o período e o formato desejado.")
+    with st.container(border=True):
+        st.markdown(
+            "**Sugestões para experimentar**\n\n"
+            "- Quantos clientes interagiram com campanhas de WhatsApp em 2024?\n"
+            "- Mostre um gráfico de barras com as reclamações não resolvidas por canal.\n"
+            "- Mostre a evolução mensal das reclamações por canal de julho de 2024 a julho de 2025."
+        )
 for entry in history:
     with st.chat_message("user"):
         st.write(entry["question"])
