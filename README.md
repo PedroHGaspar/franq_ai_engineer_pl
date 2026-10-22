@@ -93,10 +93,10 @@ permanecem em tabela. Esclarecimentos são respondidos no mesmo campo de pergunt
 
 Antes do modelo, meses sem ano e “último ano/semestre/trimestre/mês” são resolvidos pela
 cobertura de datas descoberta no banco, e o intervalo é informado ao modelo. Ao concluir,
-a evidência principal precisa ser compatível com a intenção: contagens e comparações exigem agregação, tendências exigem agrupamento por
-período (e pela dimensão pedida), rankings exigem ordenação, anos e meses pedidos devem constar
-nos filtros e contagens de entidades fora de sua tabela exigem `COUNT(DISTINCT)`. Consultas de
-descoberta não são aceitas como resposta; sem evidência suficiente dentro dos limites, a
+a evidência principal precisa ser compatível com a intenção: contagens e comparações exigem
+agregação, tendências exigem agrupamento por período (e pela dimensão pedida), rankings exigem
+ordenação, anos, meses e categorias citados (ex.: “reclamações”, “app”) devem constar nos
+filtros. Consultas de descoberta não são aceitas como resposta; sem evidência suficiente dentro dos limites, a
 interface informa que a análise não foi concluída. Cada pergunta tem ID e estado próprios;
 perguntas seguintes recebem apenas perguntas e sínteses anteriores, nunca SQL ou linhas.
 

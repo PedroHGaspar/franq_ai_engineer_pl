@@ -265,6 +265,7 @@ def test_scenario_f_limit_is_reported_as_unfinished(original, monkeypatch):
     state = ask(app, "Qual o número de reclamações não resolvidas por canal?")
     assert state["status"] == "limit" and state["answer"] is None
     assert "A análise não foi concluída" in app.error[0].value
+    assert "reformular" in app.error[0].value and "SQL" not in app.error[0].value
     assert any("não constituem resposta" in item.value for item in app.caption)
     assert not app.metric and not app.get("plotly_chart") and not app.subheader[1:]
 
@@ -285,3 +286,15 @@ def test_scenario_c_trend_without_requested_category_is_rejected(original):
     assert state["status"] == "completed" and state["primary_id"] == "q2"
     assert state["results"][-1]["rows"] == reference_trend()
     assert any("Reclamação" in e.get("message", "") for e in state["events"])
+
+
+def test_compound_count_question_is_not_rejected(original):
+    # Real failure: counting sales next to customers was taken as a non-distinct customer count.
+    sql = (
+        "SELECT (SELECT COUNT(*) FROM clientes) AS clientes, "
+        "(SELECT COUNT(*) FROM compras) AS vendas"
+    )
+    state = DataAgent(original, ScriptedModel(query(sql), finish())).run(
+        "quantos clientes fizemos e quantas vendas temos"
+    )
+    assert state["status"] == "completed" and state["results"][0]["rows"] == [[100, 946]]

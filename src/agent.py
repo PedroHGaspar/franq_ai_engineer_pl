@@ -153,7 +153,8 @@ class DataAgent:
                 api_key=settings.openai_api_key,
                 max_tokens=settings.max_output_tokens,
                 timeout=45,
-                max_retries=0,
+                # Transient connection failures are retried; each call still has its reservation.
+                max_retries=2,
                 reasoning_effort="none",
             )
         self.model = model.bind_tools(list(self.tools.values()), parallel_tool_calls=False)
@@ -578,7 +579,6 @@ class DataAgent:
                     [*state.get("clarifications", []), state.get("period") or ""],
                     answer.model_dump(),
                     results,
-                    self.database.list_tables(),
                 )
                 if primary:
                     sql = results[primary]["sql"]

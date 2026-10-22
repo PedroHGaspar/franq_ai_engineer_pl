@@ -63,7 +63,6 @@ class Intent:
     ranking: bool = False
     aggregate: bool = False
     metadata: bool = False
-    counted: str | None = None
     years: set[str] = field(default_factory=set)
     months: set[int] = field(default_factory=set)
 
@@ -78,14 +77,12 @@ def infer_intent(question: str, clarifications: list[str] | None = None) -> Inte
     ]
     trend = bool(TREND.search(text))
     grouped = bool(dimensions or re.search(r"\b(?:de|em|para) cada\b", text))
-    counted = re.search(r"\b(?:quant[oa]s|numero de|quantidade de)\s+(\w+)", text)
     return Intent(
         trend=trend,
         grouped=grouped,
         ranking=bool(SUPERLATIVE.search(text)) and not re.match(r"\s*quant[oa]s\b", text),
         aggregate=bool(AGGREGATE.search(text)) or trend or grouped,
         metadata=bool(METADATA.search(text)),
-        counted=counted.group(1) if counted else None,
         years=set(YEAR.findall(context)),
         months={i + 1 for i, name in enumerate(MONTHS) if re.search(rf"\b{name}\b", context)},
     )
@@ -133,12 +130,6 @@ def _query(sql: str):
         return None
 
 
-def _direct_sources(select: exp.Select) -> list[exp.Expression]:
-    source = select.args.get("from_") or select.args.get("from")
-    sources = [source.this] if source else []
-    return sources + [join.this for join in select.args.get("joins") or []]
-
-
 def _group_terms(select: exp.Select) -> list[str]:
     # GROUP BY 1 or GROUP BY alias refers to the projection, which carries the expression.
     projections = select.expressions
@@ -153,12 +144,7 @@ def _group_terms(select: exp.Select) -> list[str]:
     return terms
 
 
-def _singular(word: str) -> str:
-    word = normalize(word)
-    return word[:-1] if word.endswith("s") else word
-
-
-def shape_problems(intent: Intent, result: dict, tables: list[str]) -> list[str]:
+def shape_problems(intent: Intent, result: dict) -> list[str]:
     """Explains why a result cannot answer the question; empty when it is sufficient."""
     if intent.metadata:
         return []
@@ -205,20 +191,6 @@ def shape_problems(intent: Intent, result: dict, tables: list[str]) -> list[str]
             and f"'{month:02d}'" not in sql
         ):
             problems.append(f"o mês {MONTH_LABELS[month - 1]} não aparece nos filtros da consulta")
-    entity = next(
-        (t for t in tables if intent.counted and _singular(t) == _singular(intent.counted)), None
-    )
-    for count in tree.find_all(exp.Count) if entity else []:
-        scope = count.find_ancestor(exp.Select)
-        sources = _direct_sources(scope) if scope else []
-        names = {source.name for source in sources if isinstance(source, exp.Table)}
-        base = bool(sources) and len(names) == len(sources) and names <= set(tables)
-        if not isinstance(count.this, exp.Distinct) and base and names != {entity}:
-            problems.append(
-                f"a pergunta conta {intent.counted} únicos; use COUNT(DISTINCT ...) "
-                "para não contar eventos repetidos"
-            )
-            break
     return problems
 
 
@@ -227,7 +199,6 @@ def select_primary(
     clarifications: list[str],
     answer: dict,
     results: dict[str, dict],
-    tables: list[str],
 ) -> tuple[str | None, list[str]]:
     """Chooses the cited result that answers the question, or explains why none does."""
     intent = infer_intent(question, clarifications)
@@ -235,7 +206,7 @@ def select_primary(
     candidates = [explicit] if explicit else list(reversed(answer["evidence_ids"]))
     problems = []
     for key in candidates:
-        problems = shape_problems(intent, results[key], tables)
+        problems = shape_problems(intent, results[key])
         if not problems:
             return key, []
     return None, problems

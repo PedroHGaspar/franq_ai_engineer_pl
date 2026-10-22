@@ -5,7 +5,6 @@ from src.intent import infer_intent, resolve_period, shape_problems
 from tests.conftest import ScriptedModel, finish
 
 COVERAGE = ("2024-07-22", "2025-07-22")
-TABLES = ["clientes", "compras", "suporte", "campanhas_marketing"]
 
 
 def result(sql, columns=("n",), rows=((1,),)):
@@ -50,7 +49,7 @@ def test_intent_of_official_questions():
     # "por cliente" is the denominator of the average, not a grouping dimension.
     assert average.ranking and average.aggregate and not average.grouped
     count = infer_intent("Quantos clientes interagiram com campanhas de WhatsApp em 2024?")
-    assert count.counted == "clientes" and count.years == {"2024"} and not count.ranking
+    assert count.years == {"2024"} and not count.ranking
 
 
 TREND = infer_intent("Qual a tendência de reclamações por canal?", ["2025"])
@@ -84,33 +83,17 @@ MONTHLY = (
     ],
 )
 def test_trend_rejects_intermediate_queries(sql, columns, rows):
-    assert shape_problems(TREND, result(sql, columns, rows), TABLES)
+    assert shape_problems(TREND, result(sql, columns, rows))
 
 
 def test_trend_accepts_monthly_series_by_channel():
     rows = (("2025-01", "Chat", 2), ("2025-02", "Chat", 3))
-    assert not shape_problems(TREND, result(MONTHLY, ("mes", "canal", "n"), rows), TABLES)
-
-
-@pytest.mark.parametrize(
-    "sql,ok",
-    [
-        ("SELECT COUNT(*) n FROM campanhas_marketing WHERE canal='WhatsApp'", False),
-        (
-            "SELECT COUNT(DISTINCT cliente_id) n FROM campanhas_marketing WHERE canal='WhatsApp'",
-            True,
-        ),
-        ("SELECT COUNT(*) n FROM clientes c WHERE EXISTS (SELECT 1 FROM compras p)", True),
-    ],
-)
-def test_counting_entities_requires_distinct_outside_their_table(sql, ok):
-    intent = infer_intent("Quantos clientes interagiram com WhatsApp?")
-    assert (not shape_problems(intent, result(sql), TABLES)) is ok
+    assert not shape_problems(TREND, result(MONTHLY, ("mes", "canal", "n"), rows))
 
 
 def test_metadata_question_accepts_discovery():
     intent = infer_intent("Quais canais existem no suporte?")
-    assert not shape_problems(intent, result("SELECT DISTINCT canal FROM suporte"), TABLES)
+    assert not shape_problems(intent, result("SELECT DISTINCT canal FROM suporte"))
 
 
 @pytest.mark.parametrize(
